@@ -94,3 +94,27 @@ def test_ltv_and_dependents_compute_when_lifetime_present():
 def test_completely_empty_params_never_crashes():
     result = compute_unit_economics({})
     assert all(v is None for v in result.values())
+
+
+def test_metric_evidence_labels_inherit_weakest_dependency():
+    from theoretical.simulation.unit_economics import compute_metric_evidence_labels
+
+    labels = {
+        "price_per_unit": "ESTIMATE",
+        "variable_cost_per_unit": "ESTIMATE",
+        "CAC": "ASSUMPTION",
+        "avg_customer_lifetime_months": "UNKNOWN",
+        "monthly_burn": "ESTIMATE",
+        "budget": "CONFIRMED",
+    }
+    result = compute_metric_evidence_labels(labels)
+
+    assert result["gross_margin"] == "ESTIMATE"
+    assert result["LTV"] == "UNKNOWN"  # lifetime is the weakest link
+    assert result["LTV_to_CAC"] == "UNKNOWN"
+    assert result["payback_period"] == "ASSUMPTION"  # CAC weaker than ESTIMATE price/cost
+    assert result["runway_months"] == "ESTIMATE"  # CONFIRMED budget doesn't hide ESTIMATE burn
+    assert result["breakeven_customers"] == "ESTIMATE"
+    # independents echoed back unchanged
+    assert result["budget"] == "CONFIRMED"
+    assert result["CAC"] == "ASSUMPTION"
