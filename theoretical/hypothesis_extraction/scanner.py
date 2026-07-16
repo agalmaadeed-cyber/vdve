@@ -58,7 +58,11 @@ class Hypothesis:
     phrasing_status: str = "PENDING"          # Packet #2 (P1.0.2 phrasing layer)
     risk_score: float | None = None           # Packet #3 (P1.0.3)
     uncertainty_score: float | None = None    # Packet #3 (P1.0.3)
-    rank: int | None = None                   # Packet #3 (P1.0.3)
+    rank_score: float | None = None           # Packet #3 (P1.0.3) — risk_score * uncertainty_score
+    rank: int | None = None                   # Packet #3 (P1.0.3) — final position within its list (1 = highest)
+    adjustment_status: str | None = None      # Packet #3 (P1.0.3b) — "APPLIED" | "FAILED" | None (no LLM pass run)
+    dependent_fields: list[str] | None = None # Packet #3 (P1.0.3b) — only set when adjustment_status == "APPLIED"
+    adjustment_rationale: str | None = None   # Packet #3 (P1.0.3b) — only set when adjustment_status == "APPLIED"
 
 
 @dataclass
