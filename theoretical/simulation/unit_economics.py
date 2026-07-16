@@ -149,3 +149,32 @@ def compute_scenarios(approved_params: dict[str, dict]) -> dict[str, dict]:
             )
         scenarios[scenario] = compute_unit_economics(shocked)
     return scenarios
+
+
+# P1.0.4(b)'s inheritance rule ("every derived number carries the
+# evidence_label of its weakest input, never upgraded") was documented
+# in P1.0 but never made executable until now -- Packet #5 needed it
+# to display labels in the UI, so it belongs here, not in UI code.
+METRIC_DEPENDENCIES: dict[str, list[str]] = {
+    "gross_margin": ["price_per_unit", "variable_cost_per_unit"],
+    "LTV": ["price_per_unit", "variable_cost_per_unit", "avg_customer_lifetime_months"],
+    "LTV_to_CAC": ["price_per_unit", "variable_cost_per_unit", "avg_customer_lifetime_months", "CAC"],
+    "payback_period": ["CAC", "price_per_unit", "variable_cost_per_unit"],
+    "runway_months": ["budget", "monthly_burn"],
+    "breakeven_customers": ["monthly_burn", "price_per_unit", "variable_cost_per_unit"],
+}
+
+
+def compute_metric_evidence_labels(param_labels: dict[str, str]) -> dict[str, str]:
+    """
+    param_labels: {independent_name: evidence_label} for the six
+    INDEPENDENTS. Returns a dict covering all twelve fields (six
+    independents echoed back unchanged, six derived metrics assigned
+    the single weakest -- highest-uncertainty -- label among their
+    declared dependencies). Never upgrades; always the worst link.
+    """
+    result = dict(param_labels)
+    for metric, deps in METRIC_DEPENDENCIES.items():
+        labels = [param_labels.get(d, "UNKNOWN") for d in deps]
+        result[metric] = max(labels, key=lambda l: UNCERTAINTY_BY_LABEL.get(l, 3))
+    return result
