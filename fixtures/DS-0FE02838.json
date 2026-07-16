@@ -1,0 +1,367 @@
+{
+  "source": {
+    "type": "unicorn_hunter",
+    "reference": "UH Idea ID: 2",
+    "uh_sector": "Productivity SaaS / AI Tools / SMB",
+    "uh_idea_name": "ChiefBot — المساعد التنفيذي على واتساب/تيليجرام",
+    "uh_next_step": "**الأسبوع القادم — خطوتان لا غنى عنهما قبل البناء:**\n\n**أولاً:** جرّب التشغيل اليدوي الكامل — اطلب من 3 مديرين إرسال رسائلهم الحقيقية لمدة 3 أيام متتالية وعالجها أنت يدوياً بـ GPT-4. قِس: كم رسالة وصلت؟ كم وقت استغرقت؟ هل طلبوا الاسترجاع؟ هذا يعطيك التكلفة التشغيلية الحقيقية للـ MVP.\n\n**ثانياً:** صمّم رسالة ترحيب مختصرة تشرح بجملتين أن المعالجة آلية 100% وأن لا إنسان يرى البيانات — اختبر إن كانت هذه الجملة تكسر حاجز الخصوصية أم لا. إذا لم تكسره، فالمشكلة أعمق وتحتاج تصميم تجربة مستخدم مختلفة كلياً.",
+    "uh_final_score": "43/50",
+    "uh_final_decision": "Test ⚠️\n\n> المنتج واعد لكنه ليس جاهزاً للبناء الكامل بعد. هناك مجهولان حقيقيان يجب حلّهما أولاً قبل أي استثمار في الكود."
+  },
+  "status": "ready",
+  "gap_map": {},
+  "version": 1,
+  "language": "ar",
+  "sections": {
+    "solution": {
+      "usage": {
+        "notes": "Extracted from Unicorn Hunter report, label: 'MVP Shape'",
+        "value": "- بوت تيليجرام يستقبل رسائل نصية وصوتية\n- GPT-4 يصنّف كل رسالة (مشروع، نوع، أولوية)\n- Google Sheet يعمل كقاعدة بيانات مرئية\n- أمر `/find` بسيط لاسترجاع المعلومات\n- **إضافة جديدة بعد التحقق:** رسالة ترحيب تشرح بوضوح أن المعالجة آلية بالكامل وأن لا إنسان يقرأ البيانات",
+        "sources": [],
+        "filled_at": "2026-07-14T09:51:17.488339+00:00",
+        "filled_by": "uh_mapper",
+        "field_code": "C4",
+        "evidence_label": "ESTIMATE"
+      },
+      "value": {
+        "notes": "Combined from Unicorn Hunter labels: 'Proposed Solution' and 'Why Would the Customer Pay?'",
+        "value": "بوت على تيليجرام يعمل كذاكرة تنفيذية ذكية. المدير يرسل أي شيء بشكله الطبيعي والبوت يصنّفها بـ AI ويحفظها في Google Sheet منظّم، مع إمكانية الاسترجاع الفوري.\nتأكد من التحقق الميداني أن مديراً واحداً على الأقل أبدى استعداداً فورياً للدفع والاشتراك — وهو مؤشر إيجابي حقيقي. لكن حاجز الخصوصية ظهر بقوة عند مدير ثانٍ وقد يُضعف معدل التحويل الفعلي.",
+        "sources": [],
+        "filled_at": "2026-07-14T09:51:17.488339+00:00",
+        "filled_by": "uh_mapper",
+        "field_code": "C2",
+        "evidence_label": "ESTIMATE"
+      },
+      "complexity": {
+        "notes": "",
+        "value": "تعقيد تقني متوسط-منخفض للـ MVP:\n- بوت تيليجرام: Telegram Bot API — متاح ومجاني\n- معالجة الرسائل: GPT-4 API (أو بديل مفتوح المصدر)\n- قاعدة البيانات: Google Sheets API في البداية، قاعدة بيانات مناسبة لاحقاً\n- الاسترجاع: بحث نصي بسيط أو RAG للإصدارات المتقدمة\n\nأصعب جزء تقني: دقة التصنيف التلقائي وربط السياق بالمشاريع الصحيحة — خاصة للرسائل المبهمة أو متعددة الموضوعات.\n\nتحدٍّ إضافي كُشف ميدانياً: واتساب Business API معقد ومكلف في البداية — تيليجرام أسهل للـ MVP.",
+        "sources": [
+          "تقرير Unicorn Hunter — قسم شكل MVP وأصعب جزء في البناء",
+          "PEESHEE AI (أبريل 2026): 'n8n leads for self-hosted UAE deployments; Claude handles bilingual Arabic-English reasoning' — peeshee.com"
+        ],
+        "filled_at": "2026-07-14T09:53:53.519719+00:00",
+        "filled_by": "research_agent",
+        "field_code": "C5",
+        "evidence_label": "CONFIRMED"
+      },
+      "description": {
+        "notes": "Extracted from Unicorn Hunter report, label: 'Proposed Solution'",
+        "value": "بوت على تيليجرام يعمل كذاكرة تنفيذية ذكية. المدير يرسل أي شيء بشكله الطبيعي والبوت يصنّفها بـ AI ويحفظها في Google Sheet منظّم، مع إمكانية الاسترجاع الفوري.",
+        "sources": [],
+        "filled_at": "2026-07-14T09:51:17.488339+00:00",
+        "filled_by": "uh_mapper",
+        "field_code": "C1",
+        "evidence_label": "ESTIMATE"
+      },
+      "differentiation": {
+        "notes": "",
+        "value": "نقاط التمايز الأساسية عن المنافسين:\n1. **لا تغيير في السلوك**: المدير يرسل على تيليجرام كما اعتاد — المنتج يلتف حول عادته الموجودة بدلاً من أن يطلب عادة جديدة (vs. Notion/ClickUp التي تتطلب تعلماً ضخماً)\n2. **تخصيص عربي**: لا onboarding معقد، اللغة العربية مدعومة بطبيعتها\n3. **سرعة الإدخال**: فكرة في 10 ثوانٍ → استرجاع في 10 ثوانٍ (vs. أدوات تحتاج تصنيفاً يدوياً)\n4. **بدون بنية مسبقة**: الـ AI يبني الهيكل بدلاً من المستخدم\n5. **موجه للفرد لا الفريق**: تركيز على قرارات وأفكار المدير الشخصية، ليس إدارة فريق",
+        "sources": [
+          "تقرير Unicorn Hunter — قسم تقييم الحلول المقترحة وسبب اختيار ChiefBot",
+          "Productive.io (يوليو 2026): شهادة على صعوبة الأدوات المنافسة — productive.io"
+        ],
+        "filled_at": "2026-07-14T09:53:53.519719+00:00",
+        "filled_by": "research_agent",
+        "field_code": "C3",
+        "evidence_label": "CONFIRMED"
+      }
+    },
+    "opportunity": {
+      "problem": {
+        "notes": "Extracted from Unicorn Hunter report, label: 'Problem'",
+        "value": "المدير يعيش في دوامة تنظيمية متكررة كل 3-8 أسابيع: فوضى → أزمة → محاولة تنظيم → إرهاق → هجر → فوضى من جديد. الحلول الموجودة تضع عبء البناء والصيانة على المستخدم نفسه.",
+        "sources": [],
+        "filled_at": "2026-07-14T09:51:17.488339+00:00",
+        "filled_by": "uh_mapper",
+        "field_code": "A1",
+        "evidence_label": "ESTIMATE"
+      },
+      "why_now": {
+        "notes": "",
+        "value": "ثلاثة عوامل توقيت متزامنة تجعل 2026 اللحظة المثلى: (1) سوق تطبيقات السحابة في الشرق الأوسط يسجل نمواً استثنائياً بـ 19.81% سنوياً مع دعم حكومي ضخم (رؤية 2030، استراتيجية الإمارات الرقمية). (2) الإمارات تُسجّل أعلى معدل تبنٍّ للذكاء الاصطناعي عالمياً بـ 59.4% من القوى العاملة النشطة، بعد قفزة من 10% في 2023 إلى 56% في 2025. (3) المملكة العربية السعودية أعلنت 2026 عاماً للذكاء الاصطناعي، مع تخصيص 20 مليار دولار للبنية التحتية الرقمية.",
+        "sources": [
+          "Mordor Intelligence (2025): سوق تطبيقات السحابة في الشرق الأوسط — mordorintelligence.com",
+          "PEESHEE AI (أبريل 2026): 'The UAE now holds the world's highest AI adoption rate — 59.4%' — peeshee.com",
+          "Competenza (أبريل 2026): 'Saudi Arabia declared 2026 the Year of AI' — competenza.ae"
+        ],
+        "filled_at": "2026-07-14T09:53:53.519719+00:00",
+        "filled_by": "research_agent",
+        "field_code": "A5",
+        "evidence_label": "CONFIRMED"
+      },
+      "who_faces_it": {
+        "notes": "",
+        "value": "المدير التنفيذي وصاحب العمل الصغير الذي يدير 3-10 مشاريع متوازية، يعمل بشكل مستقل أو مع فريق صغير، ويستخدم مزيجاً من واتساب ونوتس وإيميل وورق وأدوات متفرقة. لديه ذكاء تنفيذي عالٍ لكن نظامه الشخصي فوضوي. السياق الجغرافي: عربي أو خليجي بشكل رئيسي.",
+        "sources": [
+          "تقرير Unicorn Hunter الأصلي — بطاقة المشكلة، قسم المستخدم المستهدف"
+        ],
+        "filled_at": "2026-07-14T09:53:53.519719+00:00",
+        "filled_by": "research_agent",
+        "field_code": "A2",
+        "evidence_label": "CONFIRMED"
+      },
+      "why_insufficient": {
+        "notes": "الفجوة الأعمق ليست في الميزات بل في نموذج التفاعل: كل الأدوات الموجودة تطلب من المدير أن يتكيف معها، بينما ChiefBot يتكيف مع سلوك المدير الموجود (إرسال رسائل على تيليجرام/واتساب).",
+        "value": "الحلول الموجودة (Notion، Trello، ClickUp، Asana) تضع عبء البناء والصيانة على المستخدم: Notion وClickUp يتطلبان منحنى تعلم شديد يصل إلى 2-4 أسابيع قبل أن تبدأ الإنتاجية الفعلية. ChatGPT العام يجيب على أسئلة لكن لا يتذكر السياق ولا يتابع المشاريع. المساعد الشخصي البشري حل مكلف وغير متاح للجميع. لا توجد أداة عربية متخصصة تعمل داخل واتساب/تيليجرام وتفهم السياق العربي.",
+        "sources": [
+          "تقرير Unicorn Hunter — بطاقة المشكلة، قسم لماذا الحل الحالي غير كافٍ",
+          "Productive.io (2026): 'Users consistently report 2 to 4 weeks before the tool feels productive' — بخصوص ClickUp",
+          "aipmtools.org (2026): مقارنة ClickUp vs Asana vs Notion"
+        ],
+        "filled_at": "2026-07-14T09:53:53.519719+00:00",
+        "filled_by": "research_agent",
+        "field_code": "A4",
+        "evidence_label": "CONFIRMED"
+      },
+      "current_solutions": {
+        "notes": "Extracted from Unicorn Hunter report, label: 'Current User Situation'",
+        "value": "المدير يخزّن أفكاره وقراراته ومهامه في 5-7 أدوات غير مترابطة، ويضيع 5-10 ساعات أسبوعياً في البحث عن معلومات أو إعادة التفكير في قرارات ضاع سياقها.",
+        "sources": [],
+        "filled_at": "2026-07-14T09:51:17.488339+00:00",
+        "filled_by": "uh_mapper",
+        "field_code": "A3",
+        "evidence_label": "ESTIMATE"
+      }
+    },
+    "business_model": {
+      "pricing": {
+        "notes": "Extracted from Unicorn Hunter report, label: 'Revenue Model'",
+        "value": "- مرحلة أولى: مجاني لأول 50 رسالة/شهر\n- خطة فردية: $19-29/شهر حتى 500 رسالة\n- خطة مكثفة: $49/شهر غير محدودة\n- مستقبلاً: خطة فريق بـ $99/شهر",
+        "sources": [],
+        "filled_at": "2026-07-14T09:51:17.488339+00:00",
+        "filled_by": "uh_mapper",
+        "field_code": "D3",
+        "evidence_label": "ESTIMATE"
+      },
+      "channels": {
+        "notes": "Extracted from Unicorn Hunter report, label: 'Market Testing Method'",
+        "value": "نشر منشور على LinkedIn وX للمديرين التنفيذيين مع تجربة يدوية لأول 20 شخص — **لكن يجب إضافة أسبوع كامل من التشغيل اليدوي الفعلي مع 3 مديرين لقياس حجم الرسائل الحقيقي والتكلفة التشغيلية قبل الأتمتة.**",
+        "sources": [],
+        "filled_at": "2026-07-14T09:51:17.488339+00:00",
+        "filled_by": "uh_mapper",
+        "field_code": "D6",
+        "evidence_label": "ESTIMATE"
+      },
+      "for_what": {
+        "notes": "",
+        "value": "الدفع مقابل: ذاكرة تنفيذية ذكية تعمل داخل تيليجرام — تصنيف تلقائي للأفكار والمهام والقرارات + استرجاع فوري بسؤال طبيعي + إزالة الحمل المعرفي لـ 'أين أضع هذا؟'. القيمة المدفوع عليها قابلة للقياس: استرداد 5-10 ساعات أسبوعية ضائعة.",
+        "sources": [
+          "تقرير Unicorn Hunter — قسم لماذا سيدفع العميل"
+        ],
+        "filled_at": "2026-07-14T09:53:53.519719+00:00",
+        "filled_by": "research_agent",
+        "field_code": "D2",
+        "evidence_label": "CONFIRMED"
+      },
+      "who_pays": {
+        "notes": "",
+        "value": "المدير التنفيذي أو صاحب العمل الصغير مباشرة — اشتراك فردي B2C في المرحلة الأولى، مع خطط مستقبلية للفرق (B2SMB).",
+        "sources": [
+          "تقرير Unicorn Hunter — قسم نموذج الإيراد"
+        ],
+        "filled_at": "2026-07-14T09:53:53.519719+00:00",
+        "filled_by": "research_agent",
+        "field_code": "D1",
+        "evidence_label": "CONFIRMED"
+      },
+      "initial_cost": {
+        "notes": "التقدير مبني على معطيات تقرير Unicorn Hunter ومعرفة عامة بتكاليف GPT-4 API. لم يُجرَّب التشغيل الفعلي بعد — التكلفة التشغيلية الحقيقية مجهولة حتى الآن وهي المجهول الأكبر في المشروع.",
+        "value": "تكاليف MVP المبدئية المقدّرة:\n- تطوير بوت تيليجرام: 1-2 أسابيع من وقت مطور واحد (تكلفة الفرصة أو $500-2000 إذا outsource)\n- GPT-4 API: ~$0.01-0.03 لكل رسالة معالجة (تكلفة متغيرة حسب حجم الاستخدام)\n- Google Sheets / قاعدة بيانات: مجاناً في البداية\n- استضافة: $10-50/شهر للبدء\n- تكلفة الاختبار اليدوي لأول 20 مستخدم: وقت المؤسس فقط\n\nالتكلفة التشغيلية الفعلية غير مختبرة بعد (مُدرج في المخاطر الرئيسية).",
+        "sources": [
+          "تقرير Unicorn Hunter — قسم MVP الجوهري وأسرع طريقة للاختبار",
+          "MicroSaaSHQ (مايو 2026): تقدير $10K-30K MRR potential لأدوات AI task management — microsaashq.com"
+        ],
+        "filled_at": "2026-07-14T09:53:53.519719+00:00",
+        "filled_by": "research_agent",
+        "field_code": "D5",
+        "evidence_label": "ESTIMATE"
+      },
+      "revenue_potential": {
+        "notes": "Extracted from Unicorn Hunter report, label: 'Revenue Model'",
+        "value": "- مرحلة أولى: مجاني لأول 50 رسالة/شهر\n- خطة فردية: $19-29/شهر حتى 500 رسالة\n- خطة مكثفة: $49/شهر غير محدودة\n- مستقبلاً: خطة فريق بـ $99/شهر",
+        "sources": [],
+        "filled_at": "2026-07-14T09:51:17.488339+00:00",
+        "filled_by": "uh_mapper",
+        "field_code": "D4",
+        "evidence_label": "ESTIMATE"
+      }
+    },
+    "customer_market": {
+      "user": {
+        "notes": "",
+        "value": "المستخدم النهائي هو المدير التنفيذي نفسه أو صاحب العمل الصغير — في هذا النموذج الدافع والمستخدم شخص واحد. يستخدم تيليجرام أو واتساب كأداة تواصل يومية أساسية.",
+        "sources": [
+          "تقرير Unicorn Hunter — بطاقة المشكلة وقسم المنتج النهائي المقترح"
+        ],
+        "filled_at": "2026-07-14T09:53:53.519719+00:00",
+        "filled_by": "research_agent",
+        "field_code": "B2",
+        "evidence_label": "CONFIRMED"
+      },
+      "payer": {
+        "notes": "Extracted from Unicorn Hunter report, label: 'Target Customer'",
+        "value": "المدير التنفيذي أو صاحب العمل الصغير الذي يدير 3-10 مشاريع متوازية، يعمل في سياق عربي أو خليجي، ويستخدم واتساب كأداته الأساسية للتواصل.",
+        "sources": [],
+        "filled_at": "2026-07-14T09:51:17.488339+00:00",
+        "filled_by": "uh_mapper",
+        "field_code": "B1",
+        "evidence_label": "ESTIMATE"
+      },
+      "geography": {
+        "notes": "",
+        "value": "السوق الأساسي: منطقة الخليج العربي (السعودية، الإمارات، الكويت، قطر) مع توسع محتمل لبقية الدول العربية. السعودية تمثل 37.61% من سوق تطبيقات السحابة في الشرق الأوسط. الإمارات تحتل أعلى معدل تبنٍّ للذكاء الاصطناعي عالمياً.",
+        "sources": [
+          "Mordor Intelligence (2025): 'Saudi Arabia commanded 37.61% of the Middle East cloud applications market share in 2024' — mordorintelligence.com",
+          "PEESHEE AI (أبريل 2026): إحصاءات تبني الذكاء الاصطناعي في الإمارات — peeshee.com"
+        ],
+        "filled_at": "2026-07-14T09:53:53.519719+00:00",
+        "filled_by": "research_agent",
+        "field_code": "B5",
+        "evidence_label": "CONFIRMED"
+      },
+      "beneficiary": {
+        "notes": "",
+        "value": "المدير مباشرة (يسترجع وقته ويخفف حمله المعرفي)، والفريق بشكل غير مباشر (قرارات أسرع وردود أقل تأخيراً).",
+        "sources": [
+          "تقرير Unicorn Hunter — جدول تكلفة المشكلة"
+        ],
+        "filled_at": "2026-07-14T09:53:53.519719+00:00",
+        "filled_by": "research_agent",
+        "field_code": "B4",
+        "evidence_label": "CONFIRMED"
+      },
+      "competitors": {
+        "notes": "لم يُعثر على منافس عربي مباشر لبوت تيليجرام للمديرين. الفجوة تبدو حقيقية لكنها تحتاج تحققاً ميدانياً إضافياً (بحث في متاجر التطبيقات ومجتمعات المطورين العرب).",
+        "value": "المنافسون في ثلاث فئات:\n\n**الفئة الأولى — أدوات إنتاجية عامة (منافسون غير مباشرون):**\n- ClickUp: أقوى أداة شاملة (4.6/5 على G2 من 12,000+ مراجعة)، لكن منحنى تعلم شديد 2-4 أسابيع\n- Notion: مرن لكن يعتمد على المستخدم لبناء الهيكل بالكامل — شحن أكثر من 90 ميزة في 2025\n- Asana: مناسب للفرق، اشتراك Starter بـ $10.99-13.49/مستخدم/شهر\n- Motion: جدولة ذكية، $19/شهر للأفراد\n\n**الفئة الثانية — بوتات تيليجرام/واتساب للإنتاجية (منافسون مباشرون محتملون):**\n- لا يوجد منافس عربي واضح متخصص في هذه الشريحة (فجوة تأكيدية من تقرير Unicorn Hunter)\n- بوتات تيليجرام عامة للتنظيم موجودة دولياً لكن بدون تخصيص عربي\n\n**الفئة الثالثة — ذكاء اصطناعي للمعرفة (منافسون مستقبليون):**\n- Glean: منصة بحث المعرفة المؤسسية — تربط 100+ تطبيق SaaS، موجهة للمؤسسات الكبيرة\n- Fireflies/Otter: تسجيل الاجتماعات وتلخيصها، ليست بوتات تيليجرام\n\n**الميزة التنافسية الجوهرية لـ ChiefBot:** لا يوجد منافس مباشر يجمع (بوت تيليجرام + تصنيف AI + دعم عربي + تصميم للمدير الفرد لا للفريق) في منتج واحد.",
+        "sources": [
+          "G2 (2026): 'The best overall alternative to WhatsApp bot is ClickUp, rated ~4.6 stars from 12243+ reviewers' — g2.com",
+          "Productive.io (يوليو 2026): 'Users consistently report 2 to 4 weeks before the tool feels productive' — productive.io",
+          "AdviceScout (2026): Glean وFireflies وOtter كأدوات AI للإنتاجية المؤسسية — advicescout.com",
+          "Competenza (أبريل 2026): 'Limited bilingual developers constrain the delivery of Arabic-native modules' — competenza.ae"
+        ],
+        "filled_at": "2026-07-14T09:53:53.519719+00:00",
+        "filled_by": "research_agent",
+        "field_code": "B7",
+        "evidence_label": "CONFIRMED"
+      },
+      "market_size": {
+        "notes": "المنهجية منطقية لكن لم تُطبَّق بعد للوصول لرقم SAM فعلي.",
+        "value": "لا يوجد رقم محدد لشريحة 'بوت AI للإنتاجية للمديرين العرب'. المؤسس يقترح منهجية تقدير بناءً على عدد الشركات المرخصة: الشركات المتوسطة = مدير واحد لكل شركة، الشركات الصغيرة = مدير لكل 10 شركات، الشركات الكبيرة = 10 مدراء لكل شركة. الرقم الفعلي لم يُحسب بعد.",
+        "sources": [],
+        "filled_at": "2026-07-14T10:26:52.188647+00:00",
+        "filled_by": "interview_agent",
+        "field_code": "B6",
+        "evidence_label": "ASSUMPTION"
+      },
+      "decision_maker": {
+        "notes": "",
+        "value": "المدير نفسه هو صانع القرار الفردي في الاشتراك — لا يحتاج موافقة قسم IT أو لجنة مشتريات. قرار الشراء تقديري فردي مشابه لاشتراكات Notion وTrello الشخصية.",
+        "sources": [
+          "تقرير Unicorn Hunter — قسم نموذج الإيراد والتسعير"
+        ],
+        "filled_at": "2026-07-14T09:53:53.519719+00:00",
+        "filled_by": "research_agent",
+        "field_code": "B3",
+        "evidence_label": "CONFIRMED"
+      }
+    },
+    "founder_resources": {
+      "time": {
+        "notes": "",
+        "value": "دوام جزئي، 5-10 ساعات في الأسبوع.",
+        "sources": [],
+        "filled_at": "2026-07-14T10:14:58.795084+00:00",
+        "filled_by": "interview_agent",
+        "field_code": "E3",
+        "evidence_label": "CONFIRMED"
+      },
+      "assets": {
+        "notes": "",
+        "value": "أكواد سابقة من محاولات تقنية قابلة للتوظيف جزئياً. شبكة علاقات مع مديرين تنفيذيين ووصول محتمل لعملاء، لكن المؤسس غير متأكد من كيفية تحويل هذه الشبكة إلى عملاء فعليين.",
+        "sources": [],
+        "filled_at": "2026-07-14T10:16:55.249773+00:00",
+        "filled_by": "interview_agent",
+        "field_code": "E5",
+        "evidence_label": "CONFIRMED"
+      },
+      "budget": {
+        "notes": "",
+        "value": "حوالي 1000 دولار كميزانية أولية متاحة للمشروع. التطوير سيكون ذاتياً في البداية. عند التوسع يتوقع المؤسس الحاجة لمستثمرين.",
+        "sources": [],
+        "filled_at": "2026-07-14T10:13:25.467369+00:00",
+        "filled_by": "interview_agent",
+        "field_code": "E2",
+        "evidence_label": "CONFIRMED"
+      },
+      "partners": {
+        "notes": "",
+        "value": "لا يوجد شركاء، المؤسس يعمل بمفرده.",
+        "sources": [],
+        "filled_at": "2026-07-14T10:15:23.449177+00:00",
+        "filled_by": "interview_agent",
+        "field_code": "E4",
+        "evidence_label": "CONFIRMED"
+      },
+      "expertise": {
+        "notes": "",
+        "value": "المؤسس لديه خبرة تقنية عملية: تعامل مع Telegram Bot API وله محاولات بناء متقدمة لم تصل لمنتج سوقي. يستطيع العمل مع GPT API ويحتاج تعلماً إضافياً فيها. مستوى برمجي متوسط-متقدم.",
+        "sources": [],
+        "filled_at": "2026-07-14T10:02:02.534564+00:00",
+        "filled_by": "interview_agent",
+        "field_code": "E1",
+        "evidence_label": "CONFIRMED"
+      }
+    },
+    "success_definition": {
+      "risks": {
+        "notes": "Extracted from Unicorn Hunter report, label: 'Risks'",
+        "value": "- **خصوصية البيانات (خطر مرتفع — مؤكد ميدانياً):** المدير الثاني أثبت أن هذا الحاجز حقيقي وليس افتراضياً — المدير يظن أن إنساناً يقرأ رسائله، وهذا يعني أن التوضيح التقني وحده لن يكفي، يحتاج بناء ثقة تدريجية\n- **البساطة التشغيلية (غير مختبرة بعد):** لم يُجرَّب التشغيل اليدوي الفعلي — المجهول الأكبر في المشروع حالياً\n- **قيود واتساب API**\n- **جودة التصنيف وأخطاء AI**\n- **الاستمرارية والهجر**",
+        "sources": [],
+        "filled_at": "2026-07-14T09:51:17.488339+00:00",
+        "filled_by": "uh_mapper",
+        "field_code": "F3",
+        "evidence_label": "ESTIMATE"
+      },
+      "assumptions": {
+        "notes": "Combined from Unicorn Hunter sections: 'What Changed After Field Verification' and 'Field Verification Answers'",
+        "value": "**1. الاستعداد للدفع: 4/5 → يبقى 4/5 (مع تحفظ)**\nالمدير الأول أبدى استعداداً فورياً للدفع — وهذا أقوى من مجرد موافقة لفظية. لكن لا يرقى إلى 5/5 لأن عيّنة مدير واحد غير كافية، والمدير الثاني لم يصل حتى لمرحلة التفكير في السعر بسبب حاجز الخصوصية. **النتيجة: الدرجة تبقى 4 ولا ترتفع لأن الصورة مختلطة.**\n\n**2. البساطة التشغيلية: 4/5 → 3/5 (انخفاض)**\nالسبب: لم يُجرَّب التشغيل اليدوي مع 3 مديرين لمدة 3 أيام. هذا يعني أن التقييم الأصلي كان افتراضياً وبقي كذلك — لكن الآن نعرف أنه لم يُختبر، ولا يمكن الإبقاء على درجة 4 لشيء مجهول. الخطر التشغيلي حقيقي: لا نعرف كم رسالة سيرسل المدير يومياً، ولا كم تستغرق المعالجة اليدوية.\n\n**3. انخفاض مستوى المخاطرة: 4/5 → 3/5 (انخفاض)**\nالسبب: المدير الثاني كشف أن حاجز الخصوصية أعمق مما كان مقدراً — المدير لم يسأل \"هل بياناتي آمنة؟\" بل سأل \"من الشخص الذي سيقرأ رسائلي؟\" هذا يعني أن المشكلة ليست سياسة خصوصية فقط، بل هي سوء فهم جوهري لطبيعة المنتج. هذا يرفع مستوى الخطر الفعلي في الاستحواذ على العملاء.\nتحدثت مع مدير تنفيذي وابدى استعداده للدفع ومستعد يشترك من الان\nلم نجرب نحتاج نجرب\nمدير اخر تردد كثيرا بخصوص ارسال رسائله واخذ يسأل انا سارسل لمن وهو من لانه يظن ان هنالك شخص اخر على الطرف الاخر من الرسالة",
+        "sources": [],
+        "filled_at": "2026-07-14T09:51:17.488339+00:00",
+        "filled_by": "uh_mapper",
+        "field_code": "F4",
+        "evidence_label": "ESTIMATE"
+      },
+      "kill_criteria": {
+        "notes": "",
+        "value": "إذا استمر الإقبال المنخفض وتناقص الاشتراكات وتقييمات سلبية من المستخدمين، وبعد محاولة تعديل المنتج واستمر الوضع — يوقف المشروع. الحد الأقصى الإجمالي: 6 أشهر (90 يوم أولي قابل للتمديد بـ 90 يوم إضافية فقط). بعد 6 أشهر إما نجاح أو إيقاف كامل.",
+        "sources": [],
+        "filled_at": "2026-07-14T10:25:18.623305+00:00",
+        "filled_by": "interview_agent",
+        "field_code": "F2",
+        "evidence_label": "FOUNDER_OPINION"
+      },
+      "success_criteria": {
+        "notes": "",
+        "value": "10 مشتركين في الأسبوع الأول، مع تزايد تدريجي مستمر في عدد المشتركين خلال 3 أشهر، مع بقاء المشتركين الحاليين (retention إيجابي).",
+        "sources": [],
+        "filled_at": "2026-07-14T10:20:09.611199+00:00",
+        "filled_by": "interview_agent",
+        "field_code": "F1",
+        "evidence_label": "FOUNDER_OPINION"
+      }
+    }
+  },
+  "readiness": {
+    "status": "ready",
+    "threshold": 0.7,
+    "computed_at": "2026-07-14T10:26:52.189091+00:00",
+    "score_weighted": 46,
+    "unknown_fields": [],
+    "mandatory_passed": true,
+    "score_percentage": 100,
+    "mandatory_missing": []
+  },
+  "created_at": "2026-07-14T10:26:52.189102+00:00",
+  "dossier_id": "DS-0FE02838",
+  "updated_at": "2026-07-14T10:26:52.189102+00:00"
+}
