@@ -38,6 +38,9 @@ from theoretical.stress_tests.engine import (
     run_all_fixed_tests,
     run_qualitative_probe,
 )
+from theoretical.decision.ceiling import compute_ceiling
+from theoretical.decision.kill_criteria import get_kill_criteria_text
+from theoretical.decision.outcome import recommend_outcome, verify_decision_acceptance
 
 EVIDENCE_ICONS = {
     "CONFIRMED": "✅",       # same five icons as Idea Dossier
@@ -63,6 +66,27 @@ def _no_llm_probe_call(spec: dict) -> str:
     own guard clause turns into status="FAILED" for every generated
     test -- visible, not hidden, same "FAILED over silent loss"
     doctrine as every other guard in this codebase.
+    """
+    return ""
+
+
+DECISION_ICONS = {
+    "Reject": "\U0001F534",              # red circle -- same as stress-test BREAKS, both mean "stop"
+    "Hold": "⏸️",              # pause
+    "Reformulate": "\U0001F504",         # cycle arrows
+    "Pass with Conditions": "⚠️",  # same warning triangle as ASSUMPTION/DEGRADED -- "caution, not clear"
+    "Advance": "✅",                 # same check mark as CONFIRMED/SURVIVES -- "clear"
+}
+
+
+def _no_llm_recommendation_call(payload: dict) -> str:
+    """
+    Deterministic baseline stub for this screen (see packet header) --
+    same convention as _no_llm_probe_call. Always returns an empty
+    string; recommend_outcome()'s own guard clause turns this into a
+    clearly-labeled status="FALLBACK_REJECT", citing the ceiling's own
+    real triggers as evidence -- the fallback safety-net working
+    exactly as designed (Packet #9 §0), not a real judgment call.
     """
     return ""
 
@@ -288,9 +312,75 @@ if approved:
 else:
     st.info("Approve parameters above to run stress tests.")
 
+# --- Step 6: Theoretical Decision ---
+ceiling_result = None
+recommendation = None
+acceptance = None
+if approved:
+    st.subheader("6. Theoretical Decision")
+
+    all_stress_results = (fixed_results or []) + (generated_results or [])
+
+    st.markdown("**Kill Criteria Check**")
+    kill_text = get_kill_criteria_text(dossier)
+    if kill_text.strip():
+        st.text_area("F2 -- kill_criteria (read-only)", value=kill_text, height=100, disabled=True)
+        st.caption(
+            "Automated detection not wired into this screen yet (see packet "
+            "header §0) -- read the text above yourself and classify it."
+        )
+        kill_status = st.radio(
+            "Founder review",
+            ["No concern", "Possible match (unconfirmed)", "Confirmed match"],
+            key=f"kill_status_{dossier_filename}",
+        )
+        kill_match_detected = kill_status != "No concern"
+        kill_match_confirmed = kill_status == "Confirmed match"
+    else:
+        st.caption("No kill_criteria (F2) declared for this Dossier.")
+        kill_match_detected = False
+        kill_match_confirmed = False
+
+    ceiling_result = compute_ceiling(
+        unknowns_ranked, all_stress_results, kill_match_confirmed, kill_match_detected
+    )
+    st.markdown(f"**Ceiling: {DECISION_ICONS.get(ceiling_result['ceiling'], '')} {ceiling_result['ceiling']}**")
+    if ceiling_result["triggered_by"]:
+        st.caption("Triggered by: " + "; ".join(ceiling_result["triggered_by"]))
+    else:
+        st.caption("No ceiling triggers -- nothing capped this idea below Advance.")
+
+    st.markdown("**Recommendation**")
+    st.caption(
+        "Deterministic baseline mode (no LLM wired into this screen yet, same "
+        "convention as every other screen) -- the recommendation always "
+        "degrades to a system-generated Reject (status=FALLBACK_REJECT), "
+        "citing the ceiling's own triggers as evidence. This is the fallback "
+        "safety-net working exactly as designed (Packet #9 §0), not a real "
+        "judgment call -- a future packet wires the live LLM in for a "
+        "genuine within-ceiling recommendation."
+    )
+    recommendation = recommend_outcome(
+        ceiling_result, claims_ranked, all_stress_results, llm_call=_no_llm_recommendation_call
+    )
+    st.write(
+        f"{DECISION_ICONS.get(recommendation['outcome'], '')} "
+        f"**{recommendation['outcome']}** ({recommendation['status']})"
+    )
+    st.json(recommendation["payload"])
+
+    valid_refs = {h.source_field for h in claims_ranked} | {r.test_id for r in all_stress_results}
+    acceptance = verify_decision_acceptance(recommendation, ceiling_result, valid_refs)
+    if acceptance["valid"]:
+        st.success("✅ Decision acceptance check: valid (ceiling matches, range respected, grounding resolved).")
+    else:
+        st.error("❌ Decision acceptance check failed: " + "; ".join(acceptance["failures"]))
+else:
+    st.info("Approve parameters above to compute a theoretical decision.")
+
 # --- Step 6: Export ---
 if scenarios:
-    st.subheader("6. Export")
+    st.subheader("7. Export")
     export_data = {
         "dossier_id": dossier.get("dossier_id"),
         "hypotheses": {
@@ -303,6 +393,11 @@ if scenarios:
             "fixed": [asdict(r) for r in fixed_results] if fixed_results else [],
             "generated": [asdict(r) for r in generated_results] if generated_results else [],
         },
+        "theoretical_decision": {
+            "ceiling": ceiling_result,
+            "recommendation": recommendation,
+            "acceptance": acceptance,
+        } if ceiling_result else {},
     }
     st.download_button(
         "Export JSON",
