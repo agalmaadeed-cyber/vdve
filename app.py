@@ -33,6 +33,11 @@ from theoretical.simulation.unit_economics import (
     compute_metric_evidence_labels,
     compute_scenarios,
 )
+from theoretical.stress_tests.engine import (
+    generate_test_specs,
+    run_all_fixed_tests,
+    run_qualitative_probe,
+)
 
 EVIDENCE_ICONS = {
     "CONFIRMED": "✅",       # same five icons as Idea Dossier
@@ -41,6 +46,25 @@ EVIDENCE_ICONS = {
     "ASSUMPTION": "⚠️",
     "UNKNOWN": "❓",
 }
+
+OUTCOME_ICONS = {
+    "SURVIVES": "✅",       # same check mark as CONFIRMED, deliberately -- both mean "no concern"
+    "DEGRADED": "⚠️",  # same warning triangle as ASSUMPTION, deliberately -- both mean "caution"
+    "BREAKS": "\U0001F534",      # red circle -- distinct from any evidence icon, reads as "stop"
+    "NOT_EVALUABLE": "❓",   # same question mark as UNKNOWN, deliberately -- both mean "no answer available"
+}
+
+
+def _no_llm_probe_call(spec: dict) -> str:
+    """
+    Deterministic baseline stub for this screen (see packet header) --
+    mirrors the llm_call=None convention used everywhere else in this
+    app. Always returns an empty string, which run_qualitative_probe's
+    own guard clause turns into status="FAILED" for every generated
+    test -- visible, not hidden, same "FAILED over silent loss"
+    doctrine as every other guard in this codebase.
+    """
+    return ""
 
 # Registered acceptance numbers -- phase1_decisions_log.md (P1.0.2 / P1.0.3)
 KNOWN_ACCEPTANCE = {
@@ -205,9 +229,68 @@ if approved:
 else:
     st.info("Approve parameters above to run simulation.")
 
+# --- Step 5: Stress Tests ---
+fixed_results = None
+generated_results = None
+if approved:
+    st.subheader("5. Stress Tests")
+
+    scenario_input_for_shocks = {
+        p: {"value": approved[p]["value"], "evidence_label": approved[p]["evidence_label"]}
+        for p in INDEPENDENTS
+    }
+
+    st.markdown("**Fixed library** (6 tests, deterministic, no LLM)")
+    fixed_results = run_all_fixed_tests(scenario_input_for_shocks)
+    st.dataframe(
+        [
+            {
+                "test_id": r.test_id,
+                "category": r.category,
+                "shocked_param": r.shocked_param,
+                "multiplier": r.shock_multiplier,
+                "affected_metric": r.affected_metric,
+                "value": r.metric_value,
+                "outcome": f"{OUTCOME_ICONS.get(r.outcome, '')} {r.outcome}",
+            }
+            for r in fixed_results
+        ],
+        use_container_width=True,
+    )
+
+    st.markdown("**Generated tests** (top-3 ranked claims, qualitative probes)")
+    st.caption(
+        "Deterministic baseline mode (no LLM wired into this screen yet, "
+        "same convention as Parameter Extraction and Ranking above) -- "
+        "every generated test below shows status=FAILED until a future "
+        "packet wires the probe LLM in. This is the real Generated Test "
+        "list, not a placeholder -- test_id, category, target hypothesis, "
+        "and overlap with the fixed library are all real, computed data."
+    )
+    generated_specs = generate_test_specs(claims_ranked, n=3)
+    generated_results = [
+        run_qualitative_probe(spec, llm_call=_no_llm_probe_call) for spec in generated_specs
+    ]
+    st.dataframe(
+        [
+            {
+                "test_id": r.test_id,
+                "category": r.category,
+                "target_hypothesis_id": r.target_hypothesis_id,
+                "overlaps_with_fixed": ", ".join(r.overlaps_with_fixed) or "none",
+                "status": r.status,
+                "severity": r.severity or "-",
+            }
+            for r in generated_results
+        ],
+        use_container_width=True,
+    )
+else:
+    st.info("Approve parameters above to run stress tests.")
+
 # --- Step 6: Export ---
 if scenarios:
-    st.subheader("5. Export")
+    st.subheader("6. Export")
     export_data = {
         "dossier_id": dossier.get("dossier_id"),
         "hypotheses": {
@@ -216,6 +299,10 @@ if scenarios:
         },
         "approved_parameters": approved,
         "scenarios": scenarios,
+        "stress_tests": {
+            "fixed": [asdict(r) for r in fixed_results] if fixed_results else [],
+            "generated": [asdict(r) for r in generated_results] if generated_results else [],
+        },
     }
     st.download_button(
         "Export JSON",
