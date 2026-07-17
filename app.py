@@ -1,21 +1,33 @@
 """
-VDVE -- Theoretical Validation Cycle, minimal UI (P1.1).
+VDVE -- Theoretical Validation Cycle, minimal UI (P1.1, retrofitted
+in Packet #13 to the canonical P1.0.9 cycle order).
 
-No storage backend -- st.session_state only (P1.1 scope decision,
-2026-07-16). Displays the full deterministic pipeline (Packets #1-#4)
-wired together end-to-end: Dossier -> Hypothesis Extraction -> Ranking
--> Parameter Extraction -> (founder approval) -> Simulation.
+No persistent storage backend -- st.session_state only. Packet #13
+introduces the first within-session-mutable Dossier
+(st.session_state["working_dossier"]): approving an Evidence Review
+proposal writes a new Dossier version via Packet #11's
+build_new_version(), held only in session state -- closing the
+browser tab loses it, same as every other piece of state in this app.
+Real persistence remains a distinct, later decision.
 
-The LLM phrasing layer (Packet #2) is intentionally NOT wired into
-this page yet -- no ANTHROPIC_API_KEY dependency for this packet.
-Parameter Extraction runs in its deterministic llm_call=None baseline
-(everything MISSING until a future packet wires the LLM in), so every
-parameter is filled in manually below -- this is the Parameter Review
-screen's first real, working implementation, not a placeholder.
+Canonical cycle order (P1.0.9 point 4), now matched by this page's
+own section order:
+    Extraction -> Ranking -> Evidence Search/Review ->
+    [vN+1 -> re-Extraction] -> Parameter Review -> Simulation ->
+    Stress Tests -> Theoretical Decision -> Export
+
+LLM-optional features still running in deterministic baseline mode on
+this page (no ANTHROPIC_API_KEY dependency yet): hypothesis phrasing,
+ranking adjustment, parameter extraction, qualitative stress probes,
+kill-criteria auto-detection, outcome recommendation, and (new this
+packet) evidence search. Each shows its own clearly-captioned fallback
+behavior. A future packet activates them one at a time against a real
+key.
 """
 
 from __future__ import annotations
 
+import copy
 import json
 from dataclasses import asdict
 from pathlib import Path
@@ -24,6 +36,9 @@ import streamlit as st
 
 from theoretical.hypothesis_extraction.scanner import scan_dossier
 from theoretical.hypothesis_extraction.ranking import rank_hypotheses
+from theoretical.evidence_gathering.agent import gather_evidence
+from theoretical.evidence_gathering.review import build_evidence_update_trigger
+from theoretical.dossier_versioning.version import build_new_version
 from theoretical.simulation.parameter_extraction import (
     apply_founder_overrides,
     extract_parameters,
@@ -57,18 +72,11 @@ OUTCOME_ICONS = {
     "NOT_EVALUABLE": "❓",   # same question mark as UNKNOWN, deliberately -- both mean "no answer available"
 }
 
-
-def _no_llm_probe_call(spec: dict) -> str:
-    """
-    Deterministic baseline stub for this screen (see packet header) --
-    mirrors the llm_call=None convention used everywhere else in this
-    app. Always returns an empty string, which run_qualitative_probe's
-    own guard clause turns into status="FAILED" for every generated
-    test -- visible, not hidden, same "FAILED over silent loss"
-    doctrine as every other guard in this codebase.
-    """
-    return ""
-
+EVIDENCE_SEARCH_ICONS = {
+    "FOUND": "\U0001F50E",
+    "NO_EVIDENCE_FOUND": "❓",
+    "NOT_SEARCHED": "⏳",
+}
 
 DECISION_ICONS = {
     "Reject": "\U0001F534",              # red circle -- same as stress-test BREAKS, both mean "stop"
@@ -79,18 +87,41 @@ DECISION_ICONS = {
 }
 
 
-def _no_llm_recommendation_call(payload: dict) -> str:
+def _no_llm_probe_call(spec: dict) -> str:
     """
-    Deterministic baseline stub for this screen (see packet header) --
-    same convention as _no_llm_probe_call. Always returns an empty
-    string; recommend_outcome()'s own guard clause turns this into a
-    clearly-labeled status="FALLBACK_REJECT", citing the ceiling's own
-    real triggers as evidence -- the fallback safety-net working
-    exactly as designed (Packet #9 §0), not a real judgment call.
+    Deterministic baseline stub (see module header). Always returns
+    an empty string, which run_qualitative_probe's own guard clause
+    turns into status="FAILED" for every generated test -- visible,
+    not hidden, same "FAILED over silent loss" doctrine as every
+    other guard in this codebase.
     """
     return ""
 
-# Registered acceptance numbers -- phase1_decisions_log.md (P1.0.2 / P1.0.3)
+
+def _no_llm_recommendation_call(payload: dict) -> str:
+    """
+    Deterministic baseline stub. Always returns an empty string;
+    recommend_outcome()'s own guard clause turns this into a
+    clearly-labeled status="FALLBACK_REJECT", citing the ceiling's
+    own real triggers as evidence.
+    """
+    return ""
+
+
+def _no_llm_evidence_call(hypotheses: list) -> str:
+    """
+    Deterministic baseline stub for live evidence search. Always
+    returns an empty string, which apply_evidence_search_guards()
+    turns into search_status="NOT_SEARCHED" for every hypothesis --
+    visible, not hidden. The Mock Proposals toggle below exists
+    specifically so this screen has something demonstrable without a
+    live key (see this packet's header, requirement #4).
+    """
+    return ""
+
+
+# Registered acceptance numbers -- phase1_decisions_log.md (P1.0.2 / P1.0.3).
+# Only valid at working_dossier version 1 -- see this packet's §0(b).
 KNOWN_ACCEPTANCE = {
     "DS-0FE02838.json": {"total": 13, "claim": 13, "unknown": 0},
     "DS-SYNTH-PARTIAL.json": {"total": 13, "claim": 8, "unknown": 5},
@@ -99,7 +130,7 @@ KNOWN_ACCEPTANCE = {
 FIXTURES_DIR = Path(__file__).resolve().parent / "fixtures"
 
 st.set_page_config(page_title="VDVE - Theoretical Validation Cycle", layout="wide")
-st.title("VDVE - Theoretical Validation Cycle (P1.1)")
+st.title("VDVE - Theoretical Validation Cycle (P1.1/P1.2)")
 
 # --- Dossier selection ---
 st.sidebar.header("Dossier Input")
@@ -123,13 +154,34 @@ if dossier is None:
     st.info("Select a fixture or upload a Dossier JSON to begin.")
     st.stop()
 
-st.header(f"Dossier: {dossier.get('dossier_id', 'unknown')}")
+# --- Working Dossier: session-scoped, mutable across evidence approvals ---
+# Resets only when a DIFFERENT dossier_id is loaded -- switching fixtures
+# or uploading a new file starts a fresh working copy. Persists across
+# reruns for the SAME dossier_id, so evidence approvals survive button
+# clicks and page reruns within one session. See this packet's header.
+if (
+    "working_dossier" not in st.session_state
+    or st.session_state.get("working_dossier_id") != dossier.get("dossier_id")
+):
+    st.session_state["working_dossier"] = copy.deepcopy(dossier)
+    st.session_state["working_dossier_id"] = dossier.get("dossier_id")
+    st.session_state.pop("approved_params", None)
 
-# --- Step 1: Scanner ---
-scan_result = scan_dossier(dossier)
+working_dossier = st.session_state["working_dossier"]
+
+st.header(f"Dossier: {working_dossier.get('dossier_id', 'unknown')}")
+st.metric("Working Dossier Version", f"v{working_dossier.get('version', 1)}")
+st.caption(
+    "This version advances only when you approve at least one Evidence "
+    "Review proposal below (Section 3) -- never persisted beyond this "
+    "browser session."
+)
+
+# --- Step 1: Scanner (operates on working_dossier, not the raw loaded file) ---
+scan_result = scan_dossier(working_dossier)
 
 # --- Live acceptance bar: the page itself is an acceptance test ---
-if dossier_filename in KNOWN_ACCEPTANCE:
+if working_dossier.get("version", 1) == 1 and dossier_filename in KNOWN_ACCEPTANCE:
     expected = KNOWN_ACCEPTANCE[dossier_filename]
     actual = {
         "total": scan_result.total,
@@ -144,6 +196,14 @@ if dossier_filename in KNOWN_ACCEPTANCE:
         st.success(f"✅ Acceptance check: {msg} -- MATCH")
     else:
         st.error(f"❌ Acceptance check: {msg} -- MISMATCH")
+elif working_dossier.get("version", 1) > 1:
+    st.info(
+        f"Working Dossier is at v{working_dossier['version']} (evolved via approved "
+        f"evidence, see Section 3) -- the original v1 acceptance numbers no longer "
+        f"apply by design (an upgraded-to-CONFIRMED field correctly leaves the "
+        f"hypothesis pool, P1.0.2). Actual: "
+        f"{scan_result.total}/{scan_result.claim_count}/{scan_result.unknown_count}"
+    )
 else:
     st.info(
         f"No registered acceptance numbers for this file. "
@@ -197,9 +257,77 @@ with col2:
         use_container_width=True,
     )
 
-# --- Step 4: Parameter Extraction + Review ---
-st.subheader("3. Parameter Extraction + Review")
-extracted = extract_parameters(dossier, llm_call=None)
+# --- Step 4: Evidence Search / Evidence Review (P1.0.9, Packet #13 retrofit) ---
+st.subheader("3. Evidence Search / Evidence Review")
+
+all_hyps_for_search = claims_ranked + unknowns_ranked
+current_hyp_ids = {h.source_field for h in all_hyps_for_search}
+
+use_mock = st.checkbox(
+    "Load mock evidence proposals (demo -- zero cost, no API key)",
+    value=True,
+    key=f"use_mock_{working_dossier['dossier_id']}",
+)
+
+if use_mock:
+    with open(FIXTURES_DIR / "mock_evidence_proposals.json", encoding="utf-8") as f:
+        mock_proposals = json.load(f)
+    proposals = [p for p in mock_proposals if p["hypothesis_id"] in current_hyp_ids]
+    st.caption(
+        "Showing hand-authored mock proposals (fixtures/mock_evidence_proposals.json), "
+        "filtered to hypotheses still present in the current working Dossier -- proves "
+        "the full approve -> vN+1 -> re-extraction loop with zero cost and no API key. "
+        "Uncheck to see the real (currently no-LLM-wired) evidence search pipeline."
+    )
+else:
+    evidence_results = gather_evidence(
+        all_hyps_for_search, working_dossier.get("version", 1), llm_call=_no_llm_evidence_call
+    )
+    proposals = [asdict(r) for r in evidence_results]
+    st.caption(
+        "Deterministic baseline mode (no LLM wired into this screen yet, same "
+        "convention as every other screen) -- every proposal below shows "
+        "search_status=NOT_SEARCHED until a future packet wires the live "
+        "web-search agent in with a real ANTHROPIC_API_KEY."
+    )
+
+approved_ids = set()
+if not proposals:
+    st.info("No evidence proposals for the current hypothesis pool.")
+for p in proposals:
+    icon = EVIDENCE_SEARCH_ICONS.get(p["search_status"], "")
+    with st.expander(f"{icon} {p['hypothesis_id']} -- {p['search_status']}"):
+        if p["search_status"] == "FOUND":
+            st.write(f"**Proposed value:** {p['proposed_value']}")
+            st.write(f"**Proposed evidence_label:** {p['proposed_evidence_label']}")
+            st.write(f"**Source:** {p['source']}")
+            st.write(f"**Grounding excerpt:** {p['citation_excerpt']}")
+            approve = st.checkbox(
+                "Approve this proposal",
+                key=f"approve_{p['hypothesis_id']}_{working_dossier['version']}",
+            )
+            if approve:
+                approved_ids.add(p["hypothesis_id"])
+        else:
+            st.caption("Nothing to approve for this status -- no proposed value exists.")
+
+if st.button("Apply Approved Evidence"):
+    trigger = build_evidence_update_trigger(proposals, approved_ids)
+    if trigger["updates"]:
+        result = build_new_version(working_dossier, trigger)
+        st.session_state["working_dossier"] = result["dossier"]
+        st.session_state.pop("approved_params", None)  # stale against the new version, see §0(c)
+        st.success(
+            f"Applied {len(trigger['updates'])} approved proposal(s). "
+            f"New version: v{result['dossier']['version']}."
+        )
+        st.rerun()
+    else:
+        st.info("No proposals were approved -- nothing to apply, no new version written.")
+
+# --- Step 5: Parameter Extraction + Review ---
+st.subheader("4. Parameter Extraction + Review")
+extracted = extract_parameters(working_dossier, llm_call=None)
 st.caption(
     "Deterministic baseline mode (no LLM wired into this page yet) -- "
     "every parameter below is MISSING until you fill it in and approve. "
@@ -218,7 +346,8 @@ for i, param in enumerate(INDEPENDENTS):
         default_value = info["value"] if info["value"] is not None else 0.0
         val = st.number_input(
             f"value_{param}", value=float(default_value),
-            key=f"param_{param}_{dossier_filename}", label_visibility="collapsed",
+            key=f"param_{param}_{dossier_filename}_v{working_dossier['version']}",
+            label_visibility="collapsed",
         )
         overrides[param] = {"value": val, "evidence_label": "FOUNDER_OPINION"}
 
@@ -228,10 +357,10 @@ if st.button("Approve Parameters"):
 
 approved = st.session_state.get("approved_params")
 
-# --- Step 5: Simulation ---
+# --- Step 6: Simulation ---
 scenarios = None
 if approved:
-    st.subheader("4. Simulation Scenarios")
+    st.subheader("5. Simulation Scenarios")
 
     param_labels = {p: approved[p]["evidence_label"] for p in INDEPENDENTS}
     metric_labels = compute_metric_evidence_labels(param_labels)
@@ -253,11 +382,11 @@ if approved:
 else:
     st.info("Approve parameters above to run simulation.")
 
-# --- Step 5: Stress Tests ---
+# --- Step 7: Stress Tests ---
 fixed_results = None
 generated_results = None
 if approved:
-    st.subheader("5. Stress Tests")
+    st.subheader("6. Stress Tests")
 
     scenario_input_for_shocks = {
         p: {"value": approved[p]["value"], "evidence_label": approved[p]["evidence_label"]}
@@ -312,27 +441,27 @@ if approved:
 else:
     st.info("Approve parameters above to run stress tests.")
 
-# --- Step 6: Theoretical Decision ---
+# --- Step 8: Theoretical Decision ---
 ceiling_result = None
 recommendation = None
 acceptance = None
 if approved:
-    st.subheader("6. Theoretical Decision")
+    st.subheader("7. Theoretical Decision")
 
     all_stress_results = (fixed_results or []) + (generated_results or [])
 
     st.markdown("**Kill Criteria Check**")
-    kill_text = get_kill_criteria_text(dossier)
+    kill_text = get_kill_criteria_text(working_dossier)
     if kill_text.strip():
         st.text_area("F2 -- kill_criteria (read-only)", value=kill_text, height=100, disabled=True)
         st.caption(
-            "Automated detection not wired into this screen yet (see packet "
-            "header §0) -- read the text above yourself and classify it."
+            "Automated detection not wired into this screen yet -- read the "
+            "text above yourself and classify it."
         )
         kill_status = st.radio(
             "Founder review",
             ["No concern", "Possible match (unconfirmed)", "Confirmed match"],
-            key=f"kill_status_{dossier_filename}",
+            key=f"kill_status_{dossier_filename}_v{working_dossier['version']}",
         )
         kill_match_detected = kill_status != "No concern"
         kill_match_confirmed = kill_status == "Confirmed match"
@@ -355,10 +484,7 @@ if approved:
         "Deterministic baseline mode (no LLM wired into this screen yet, same "
         "convention as every other screen) -- the recommendation always "
         "degrades to a system-generated Reject (status=FALLBACK_REJECT), "
-        "citing the ceiling's own triggers as evidence. This is the fallback "
-        "safety-net working exactly as designed (Packet #9 §0), not a real "
-        "judgment call -- a future packet wires the live LLM in for a "
-        "genuine within-ceiling recommendation."
+        "citing the ceiling's own triggers as evidence."
     )
     recommendation = recommend_outcome(
         ceiling_result, claims_ranked, all_stress_results, llm_call=_no_llm_recommendation_call
@@ -378,11 +504,12 @@ if approved:
 else:
     st.info("Approve parameters above to compute a theoretical decision.")
 
-# --- Step 6: Export ---
+# --- Step 9: Export ---
 if scenarios:
-    st.subheader("7. Export")
+    st.subheader("8. Export")
     export_data = {
-        "dossier_id": dossier.get("dossier_id"),
+        "dossier_id": working_dossier.get("dossier_id"),
+        "dossier_version": working_dossier.get("version"),
         "hypotheses": {
             "claims": [asdict(h) for h in claims_ranked],
             "unknowns": [asdict(h) for h in unknowns_ranked],
@@ -402,7 +529,7 @@ if scenarios:
     st.download_button(
         "Export JSON",
         data=json.dumps(export_data, indent=2, default=str, ensure_ascii=False),
-        file_name=f"vdve_export_{dossier.get('dossier_id', 'unknown')}.json",
+        file_name=f"vdve_export_{working_dossier.get('dossier_id', 'unknown')}_v{working_dossier.get('version')}.json",
         mime="application/json",
     )
     st.caption(

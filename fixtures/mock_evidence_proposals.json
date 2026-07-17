@@ -1,0 +1,52 @@
+[
+  {
+    "hypothesis_id": "B1",
+    "dossier_version": 1,
+    "search_status": "FOUND",
+    "searched_at": "2026-07-18T00:00:00+00:00",
+    "proposed_value": "Payer confirmed as small-business owners/executives managing 3-10 parallel projects, based on 5 founder-conducted field interviews.",
+    "proposed_evidence_label": "CONFIRMED",
+    "source": "Founder field interview log, 2026-07-15",
+    "citation_excerpt": "5 of 5 interviewed managers confirmed managing 3-10 concurrent projects and expressed direct interest in a paid solution."
+  },
+  {
+    "hypothesis_id": "B6",
+    "dossier_version": 1,
+    "search_status": "FOUND",
+    "searched_at": "2026-07-18T00:00:00+00:00",
+    "proposed_value": "Estimated 40,000-60,000 addressable SMB managers across target GCC markets, based on licensed-company registry counts.",
+    "proposed_evidence_label": "ESTIMATE",
+    "source": "GCC SME registry analysis, 2026",
+    "citation_excerpt": "Licensed SME counts across UAE/KSA suggest a mid-range addressable base of 40,000-60,000 owner-operators."
+  },
+  {
+    "hypothesis_id": "F4",
+    "dossier_version": 1,
+    "search_status": "FOUND",
+    "searched_at": "2026-07-18T00:00:00+00:00",
+    "proposed_value": "Willingness-to-pay signal remains mixed pending a broader sample beyond the initial two interviews.",
+    "proposed_evidence_label": "ASSUMPTION",
+    "source": "Founder field notes, 2026-07-15",
+    "citation_excerpt": "1 of 2 managers showed immediate willingness to pay; the second stalled on a trust/privacy concern."
+  },
+  {
+    "hypothesis_id": "A1",
+    "dossier_version": 1,
+    "search_status": "NO_EVIDENCE_FOUND",
+    "searched_at": "2026-07-18T00:00:00+00:00",
+    "proposed_value": null,
+    "proposed_evidence_label": null,
+    "source": null,
+    "citation_excerpt": null
+  },
+  {
+    "hypothesis_id": "D3",
+    "dossier_version": 1,
+    "search_status": "NOT_SEARCHED",
+    "searched_at": "2026-07-18T00:00:00+00:00",
+    "proposed_value": null,
+    "proposed_evidence_label": null,
+    "source": null,
+    "citation_excerpt": null
+  }
+]
