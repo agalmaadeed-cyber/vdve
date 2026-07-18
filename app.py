@@ -29,6 +29,7 @@ from pathlib import Path
 
 import streamlit as st
 
+from theoretical.llm_utils import escape_markdown_dollar
 from theoretical.hypothesis_extraction.scanner import scan_dossier
 from theoretical.hypothesis_extraction.phrasing import phrase_hypotheses, call_anthropic_phrasing
 from theoretical.hypothesis_extraction.ranking import rank_hypotheses, call_anthropic_risk_adjustment
@@ -318,10 +319,10 @@ for p in proposals:
     icon = EVIDENCE_SEARCH_ICONS.get(p["search_status"], "")
     with st.expander(f"{icon} {p['hypothesis_id']} -- {p['search_status']}"):
         if p["search_status"] == "FOUND":
-            st.write(f"**Proposed value:** {p['proposed_value']}")
+            st.write(f"**Proposed value:** {escape_markdown_dollar(p['proposed_value'])}")
             st.write(f"**Proposed evidence_label:** {p['proposed_evidence_label']}")
-            st.write(f"**Source:** {p['source']}")
-            st.write(f"**Grounding excerpt:** {p['citation_excerpt']}")
+            st.write(f"**Source:** {escape_markdown_dollar(p['source'])}")
+            st.write(f"**Grounding excerpt:** {escape_markdown_dollar(p['citation_excerpt'])}")
             approve = st.checkbox(
                 "Approve this proposal",
                 key=f"approve_{p['hypothesis_id']}_{working_dossier['version']}",
