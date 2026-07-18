@@ -26,10 +26,12 @@ Hypothesis ranking module (P1.0.3): risk x uncertainty.
 from __future__ import annotations
 
 import json
+import os
 from dataclasses import replace
 from typing import Callable
 
 from theoretical.hypothesis_extraction.scanner import Hypothesis
+from theoretical.llm_utils import strip_json_markdown_fence
 
 UNCERTAINTY_BY_LABEL: dict[str, int] = {
     "ESTIMATE": 1,
@@ -97,6 +99,7 @@ def apply_risk_adjustment(
     input_field_codes = {h.source_field for h in hypotheses}
 
     try:
+        raw_llm_response = strip_json_markdown_fence(raw_llm_response)
         parsed = json.loads(raw_llm_response)
         if not isinstance(parsed, list):
             raise ValueError("not an array")
@@ -205,3 +208,52 @@ def rank_hypotheses(
     unknowns_ranked = [replace(h, rank=i + 1) for i, h in enumerate(unknowns_sorted)]
 
     return claims_ranked, unknowns_ranked
+
+
+RISK_ADJUSTMENT_SYSTEM_PROMPT = """You review a batch of business hypotheses, each already carrying a deterministic base risk weight (1-5) from its Dossier section. Propose a SMALL adjustment (-1, 0, or +1) to any hypothesis whose real-world impact is unusually high or low relative to its section's typical weight, given genuine cross-hypothesis dependencies you can see in this batch.
+
+You will receive a JSON array: [{"field_code": str, "section": str, "statement": str, "base_weight": int}, ...].
+
+For each hypothesis where you have a genuine adjustment to propose, output an object with EXACTLY these keys: "field_code" (copied exactly from input), "adjustment" (-1, 0, or +1), "dependent_fields" (a non-empty array of OTHER field_code strings from the input batch whose validity depends on this hypothesis being true -- never the hypothesis's own field_code), "rationale" (a non-empty string explaining the dependency).
+
+Omit any hypothesis you have no adjustment to propose for -- omission means no change, not zero.
+
+Output ONLY a JSON array of these objects (possibly empty). No prose, no markdown fencing, no explanation outside the JSON array itself."""
+
+
+def call_anthropic_risk_adjustment(hypotheses: list[Hypothesis]) -> str:
+    """
+    Real LLM call for the bounded risk-adjustment pass (P1.0.3b).
+    Reads ANTHROPIC_API_KEY from the environment via the SDK's default
+    client behavior -- never reads, logs, or touches the key value
+    itself. Model pinned to "claude-sonnet-5", same as every prior
+    packet. hypotheses are expected to already carry uncertainty_score
+    (rank_hypotheses() computes this before calling llm_call).
+    """
+    import anthropic
+
+    if not os.environ.get("ANTHROPIC_API_KEY"):
+        raise RuntimeError(
+            "ANTHROPIC_API_KEY not set in environment. This must be set "
+            "locally by the founder -- never hardcoded, never committed."
+        )
+
+    payload = [
+        {
+            "field_code": h.source_field,
+            "section": h.source_section,
+            "statement": h.statement or h.raw_dossier_text,
+            "base_weight": compute_base_risk_score(h),
+        }
+        for h in hypotheses
+    ]
+    client = anthropic.Anthropic()
+    message = client.messages.create(
+        model="claude-sonnet-5",
+        max_tokens=2048,
+        thinking={"type": "disabled"},
+        system=RISK_ADJUSTMENT_SYSTEM_PROMPT,
+        messages=[{"role": "user", "content": json.dumps(payload, ensure_ascii=False)}],
+    )
+    text_blocks = [block.text for block in message.content if getattr(block, "type", None) == "text"]
+    return text_blocks[-1] if text_blocks else ""

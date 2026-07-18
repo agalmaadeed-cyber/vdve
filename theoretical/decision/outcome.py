@@ -27,6 +27,7 @@ from typing import Callable
 
 from theoretical.decision.ceiling import OUTCOME_ORDER
 from theoretical.hypothesis_extraction.scanner import Hypothesis
+from theoretical.llm_utils import strip_json_markdown_fence
 from theoretical.stress_tests.engine import StressTestResult
 
 RECOMMENDATION_SYSTEM_PROMPT = """You recommend one theoretical-decision outcome for a venture idea, bounded by a ceiling already computed deterministically by the system -- you may choose that ceiling outcome or any MORE conservative one, never a more optimistic one.
@@ -119,10 +120,12 @@ def call_anthropic_recommendation(payload: dict) -> str:
     message = client.messages.create(
         model="claude-sonnet-5",
         max_tokens=2048,
+        thinking={"type": "disabled"},
         system=RECOMMENDATION_SYSTEM_PROMPT,
         messages=[{"role": "user", "content": json.dumps(payload, ensure_ascii=False)}],
     )
-    return message.content[0].text
+    text_blocks = [block.text for block in message.content if getattr(block, "type", None) == "text"]
+    return text_blocks[-1] if text_blocks else ""
 
 
 def recommend_outcome(
@@ -170,6 +173,7 @@ def recommend_outcome(
     }
 
     try:
+        raw_response = strip_json_markdown_fence(raw_response)
         parsed = json.loads(raw_response)
         outcome = parsed.get("outcome") if isinstance(parsed, dict) else None
         narrative = parsed.get("narrative") if isinstance(parsed, dict) else None

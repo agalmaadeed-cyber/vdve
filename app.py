@@ -1,47 +1,44 @@
 """
-VDVE -- Theoretical Validation Cycle, minimal UI (P1.1, retrofitted
-in Packet #13 to the canonical P1.0.9 cycle order).
+VDVE -- Theoretical Validation Cycle, minimal UI (P1.1/P1.2, LLM
+activation added in Packet #14).
 
-No persistent storage backend -- st.session_state only. Packet #13
-introduces the first within-session-mutable Dossier
-(st.session_state["working_dossier"]): approving an Evidence Review
-proposal writes a new Dossier version via Packet #11's
-build_new_version(), held only in session state -- closing the
-browser tab loses it, same as every other piece of state in this app.
-Real persistence remains a distinct, later decision.
+No persistent storage backend -- st.session_state only (see Packet
+#13's own header for the working-Dossier session-state pattern).
 
-Canonical cycle order (P1.0.9 point 4), now matched by this page's
-own section order:
-    Extraction -> Ranking -> Evidence Search/Review ->
-    [vN+1 -> re-Extraction] -> Parameter Review -> Simulation ->
-    Stress Tests -> Theoretical Decision -> Export
+Six LLM-optional features can each be switched between their real
+Anthropic-backed implementation and a deterministic no-op stub via
+sidebar checkboxes, all default OFF: (a) hypothesis phrasing,
+(b) risk adjustment, (c) parameter extraction, (d) qualitative stress
+probes, (e) evidence agent, (f) outcome recommendation. Flags render
+only when ANTHROPIC_API_KEY resolves (from .streamlit/secrets.toml or
+the environment) -- with no key, the app runs exactly as before, with
+a one-line banner, no crash (Packet #14 §0(b)/(c)).
 
-LLM-optional features still running in deterministic baseline mode on
-this page (no ANTHROPIC_API_KEY dependency yet): hypothesis phrasing,
-ranking adjustment, parameter extraction, qualitative stress probes,
-kill-criteria auto-detection, outcome recommendation, and (new this
-packet) evidence search. Each shows its own clearly-captioned fallback
-behavior. A future packet activates them one at a time against a real
-key.
+Kill-criteria detection is deliberately NOT one of the six flags --
+Packet #10 §0's fail-cautious cascade reasoning holds regardless of
+key availability; it stays founder-manual review.
 """
 
 from __future__ import annotations
 
 import copy
 import json
+import os
 from dataclasses import asdict
 from pathlib import Path
 
 import streamlit as st
 
 from theoretical.hypothesis_extraction.scanner import scan_dossier
-from theoretical.hypothesis_extraction.ranking import rank_hypotheses
-from theoretical.evidence_gathering.agent import gather_evidence
+from theoretical.hypothesis_extraction.phrasing import phrase_hypotheses, call_anthropic_phrasing
+from theoretical.hypothesis_extraction.ranking import rank_hypotheses, call_anthropic_risk_adjustment
+from theoretical.evidence_gathering.agent import gather_evidence, call_anthropic_evidence_search
 from theoretical.evidence_gathering.review import build_evidence_update_trigger
 from theoretical.dossier_versioning.version import build_new_version
 from theoretical.simulation.parameter_extraction import (
     apply_founder_overrides,
     extract_parameters,
+    call_anthropic_parameter_extraction,
 )
 from theoretical.simulation.unit_economics import (
     INDEPENDENTS,
@@ -52,10 +49,11 @@ from theoretical.stress_tests.engine import (
     generate_test_specs,
     run_all_fixed_tests,
     run_qualitative_probe,
+    call_anthropic_probe,
 )
 from theoretical.decision.ceiling import compute_ceiling
 from theoretical.decision.kill_criteria import get_kill_criteria_text
-from theoretical.decision.outcome import recommend_outcome, verify_decision_acceptance
+from theoretical.decision.outcome import recommend_outcome, verify_decision_acceptance, call_anthropic_recommendation
 
 EVIDENCE_ICONS = {
     "CONFIRMED": "✅",       # same five icons as Idea Dossier
@@ -66,10 +64,10 @@ EVIDENCE_ICONS = {
 }
 
 OUTCOME_ICONS = {
-    "SURVIVES": "✅",       # same check mark as CONFIRMED, deliberately -- both mean "no concern"
-    "DEGRADED": "⚠️",  # same warning triangle as ASSUMPTION, deliberately -- both mean "caution"
-    "BREAKS": "\U0001F534",      # red circle -- distinct from any evidence icon, reads as "stop"
-    "NOT_EVALUABLE": "❓",   # same question mark as UNKNOWN, deliberately -- both mean "no answer available"
+    "SURVIVES": "✅",
+    "DEGRADED": "⚠️",
+    "BREAKS": "\U0001F534",
+    "NOT_EVALUABLE": "❓",
 }
 
 EVIDENCE_SEARCH_ICONS = {
@@ -79,49 +77,48 @@ EVIDENCE_SEARCH_ICONS = {
 }
 
 DECISION_ICONS = {
-    "Reject": "\U0001F534",              # red circle -- same as stress-test BREAKS, both mean "stop"
-    "Hold": "⏸️",              # pause
-    "Reformulate": "\U0001F504",         # cycle arrows
-    "Pass with Conditions": "⚠️",  # same warning triangle as ASSUMPTION/DEGRADED -- "caution, not clear"
-    "Advance": "✅",                 # same check mark as CONFIRMED/SURVIVES -- "clear"
+    "Reject": "\U0001F534",
+    "Hold": "⏸️",
+    "Reformulate": "\U0001F504",
+    "Pass with Conditions": "⚠️",
+    "Advance": "✅",
 }
 
 
 def _no_llm_probe_call(spec: dict) -> str:
-    """
-    Deterministic baseline stub (see module header). Always returns
-    an empty string, which run_qualitative_probe's own guard clause
-    turns into status="FAILED" for every generated test -- visible,
-    not hidden, same "FAILED over silent loss" doctrine as every
-    other guard in this codebase.
-    """
     return ""
 
 
 def _no_llm_recommendation_call(payload: dict) -> str:
-    """
-    Deterministic baseline stub. Always returns an empty string;
-    recommend_outcome()'s own guard clause turns this into a
-    clearly-labeled status="FALLBACK_REJECT", citing the ceiling's
-    own real triggers as evidence.
-    """
     return ""
 
 
 def _no_llm_evidence_call(hypotheses: list) -> str:
-    """
-    Deterministic baseline stub for live evidence search. Always
-    returns an empty string, which apply_evidence_search_guards()
-    turns into search_status="NOT_SEARCHED" for every hypothesis --
-    visible, not hidden. The Mock Proposals toggle below exists
-    specifically so this screen has something demonstrable without a
-    live key (see this packet's header, requirement #4).
-    """
     return ""
 
 
+def _load_anthropic_key() -> str | None:
+    """
+    Streamlit secrets.toml is the source of truth (matches the
+    already-deployed pattern in Unicorn Hunter / Idea Dossier) --
+    never hardcoded, never committed. Falls back to an already-set
+    environment variable. Absence is a declared, graceful state --
+    wrapped in try/except since st.secrets' exact behavior with no
+    secrets file present varies across Streamlit versions; it must
+    never raise here, only resolve to None (Packet #14 §0(b)).
+    """
+    key = None
+    try:
+        key = st.secrets.get("ANTHROPIC_API_KEY")
+    except Exception:
+        key = None
+    if not key:
+        key = os.environ.get("ANTHROPIC_API_KEY")
+    return key or None
+
+
 # Registered acceptance numbers -- phase1_decisions_log.md (P1.0.2 / P1.0.3).
-# Only valid at working_dossier version 1 -- see this packet's §0(b).
+# Only valid at working_dossier version 1 -- see Packet #13's §0(b).
 KNOWN_ACCEPTANCE = {
     "DS-0FE02838.json": {"total": 13, "claim": 13, "unknown": 0},
     "DS-SYNTH-PARTIAL.json": {"total": 13, "claim": 8, "unknown": 5},
@@ -131,6 +128,24 @@ FIXTURES_DIR = Path(__file__).resolve().parent / "fixtures"
 
 st.set_page_config(page_title="VDVE - Theoretical Validation Cycle", layout="wide")
 st.title("VDVE - Theoretical Validation Cycle (P1.1/P1.2)")
+
+# --- LLM key + feature flags (Packet #14) ---
+_anthropic_key = _load_anthropic_key()
+if _anthropic_key:
+    os.environ["ANTHROPIC_API_KEY"] = _anthropic_key  # every call_anthropic_* function reads this directly
+
+st.sidebar.header("LLM Features")
+if _anthropic_key:
+    st.sidebar.success("ANTHROPIC_API_KEY detected.")
+    flag_phrasing = st.sidebar.checkbox("a. Hypothesis phrasing", value=False, key="flag_phrasing")
+    flag_risk_adj = st.sidebar.checkbox("b. Risk adjustment (±1)", value=False, key="flag_risk_adj")
+    flag_param_extraction = st.sidebar.checkbox("c. Parameter extraction", value=False, key="flag_param_extraction")
+    flag_probes = st.sidebar.checkbox("d. Qualitative stress probes", value=False, key="flag_probes")
+    flag_evidence = st.sidebar.checkbox("e. Evidence agent (web search)", value=False, key="flag_evidence")
+    flag_recommendation = st.sidebar.checkbox("f. Outcome recommendation", value=False, key="flag_recommendation")
+else:
+    st.info("\U0001F50C LLM features: OFF -- deterministic baseline (no ANTHROPIC_API_KEY found in secrets.toml or environment).")
+    flag_phrasing = flag_risk_adj = flag_param_extraction = flag_probes = flag_evidence = flag_recommendation = False
 
 # --- Dossier selection ---
 st.sidebar.header("Dossier Input")
@@ -155,10 +170,6 @@ if dossier is None:
     st.stop()
 
 # --- Working Dossier: session-scoped, mutable across evidence approvals ---
-# Resets only when a DIFFERENT dossier_id is loaded -- switching fixtures
-# or uploading a new file starts a fresh working copy. Persists across
-# reruns for the SAME dossier_id, so evidence approvals survive button
-# clicks and page reruns within one session. See this packet's header.
 if (
     "working_dossier" not in st.session_state
     or st.session_state.get("working_dossier_id") != dossier.get("dossier_id")
@@ -177,8 +188,12 @@ st.caption(
     "browser session."
 )
 
-# --- Step 1: Scanner (operates on working_dossier, not the raw loaded file) ---
+# --- Step 1: Scanner ---
 scan_result = scan_dossier(working_dossier)
+
+hypotheses_for_pipeline = scan_result.hypotheses
+if flag_phrasing:
+    hypotheses_for_pipeline = phrase_hypotheses(scan_result.hypotheses, llm_call=call_anthropic_phrasing)
 
 # --- Live acceptance bar: the page itself is an acceptance test ---
 if working_dossier.get("version", 1) == 1 and dossier_filename in KNOWN_ACCEPTANCE:
@@ -199,9 +214,7 @@ if working_dossier.get("version", 1) == 1 and dossier_filename in KNOWN_ACCEPTAN
 elif working_dossier.get("version", 1) > 1:
     st.info(
         f"Working Dossier is at v{working_dossier['version']} (evolved via approved "
-        f"evidence, see Section 3) -- the original v1 acceptance numbers no longer "
-        f"apply by design (an upgraded-to-CONFIRMED field correctly leaves the "
-        f"hypothesis pool, P1.0.2). Actual: "
+        f"evidence) -- v1 acceptance numbers no longer apply by design. Actual: "
         f"{scan_result.total}/{scan_result.claim_count}/{scan_result.unknown_count}"
     )
 else:
@@ -219,15 +232,20 @@ hyp_rows = [
         "type": h.hypothesis_type,
         "evidence": f"{EVIDENCE_ICONS.get(h.original_evidence_label, '')} {h.original_evidence_label}",
         "raw_text": (h.raw_dossier_text[:80] + "...") if len(h.raw_dossier_text) > 80 else h.raw_dossier_text,
+        "statement": h.statement if h.statement else "(not phrased)",
+        "phrasing_status": h.phrasing_status,
     }
-    for h in scan_result.hypotheses
+    for h in hypotheses_for_pipeline
 ]
 st.dataframe(hyp_rows, use_container_width=True)
 st.caption(f"Excluded fields (EXTRACTION_EXCLUSIONS): {scan_result.excluded_fields}")
 
 # --- Step 3: Ranking ---
 st.subheader("2. Ranking (risk x uncertainty)")
-claims_ranked, unknowns_ranked = rank_hypotheses(scan_result.hypotheses, llm_call=None)
+claims_ranked, unknowns_ranked = rank_hypotheses(
+    hypotheses_for_pipeline,
+    llm_call=call_anthropic_risk_adjustment if flag_risk_adj else None,
+)
 
 col1, col2 = st.columns(2)
 with col1:
@@ -237,7 +255,7 @@ with col1:
             {
                 "rank": h.rank, "field": h.source_field,
                 "risk": h.risk_score, "uncertainty": h.uncertainty_score,
-                "rank_score": h.rank_score,
+                "rank_score": h.rank_score, "adjustment_status": h.adjustment_status,
             }
             for h in claims_ranked
         ],
@@ -250,14 +268,14 @@ with col2:
             {
                 "rank": h.rank, "field": h.source_field,
                 "risk": h.risk_score, "uncertainty": h.uncertainty_score,
-                "rank_score": h.rank_score,
+                "rank_score": h.rank_score, "adjustment_status": h.adjustment_status,
             }
             for h in unknowns_ranked
         ],
         use_container_width=True,
     )
 
-# --- Step 4: Evidence Search / Evidence Review (P1.0.9, Packet #13 retrofit) ---
+# --- Step 4: Evidence Search / Evidence Review ---
 st.subheader("3. Evidence Search / Evidence Review")
 
 all_hyps_for_search = claims_ranked + unknowns_ranked
@@ -265,7 +283,7 @@ current_hyp_ids = {h.source_field for h in all_hyps_for_search}
 
 use_mock = st.checkbox(
     "Load mock evidence proposals (demo -- zero cost, no API key)",
-    value=True,
+    value=not flag_evidence,
     key=f"use_mock_{working_dossier['dossier_id']}",
 )
 
@@ -274,21 +292,23 @@ if use_mock:
         mock_proposals = json.load(f)
     proposals = [p for p in mock_proposals if p["hypothesis_id"] in current_hyp_ids]
     st.caption(
-        "Showing hand-authored mock proposals (fixtures/mock_evidence_proposals.json), "
-        "filtered to hypotheses still present in the current working Dossier -- proves "
-        "the full approve -> vN+1 -> re-extraction loop with zero cost and no API key. "
-        "Uncheck to see the real (currently no-LLM-wired) evidence search pipeline."
+        "Showing hand-authored mock proposals -- proves the full "
+        "approve -> vN+1 -> re-extraction loop with zero cost and no API key."
     )
+elif flag_evidence:
+    evidence_results = gather_evidence(
+        all_hyps_for_search, working_dossier.get("version", 1), llm_call=call_anthropic_evidence_search
+    )
+    proposals = [asdict(r) for r in evidence_results]
+    st.caption("Live evidence search active (real web search) -- proposals below are genuine.")
 else:
     evidence_results = gather_evidence(
         all_hyps_for_search, working_dossier.get("version", 1), llm_call=_no_llm_evidence_call
     )
     proposals = [asdict(r) for r in evidence_results]
     st.caption(
-        "Deterministic baseline mode (no LLM wired into this screen yet, same "
-        "convention as every other screen) -- every proposal below shows "
-        "search_status=NOT_SEARCHED until a future packet wires the live "
-        "web-search agent in with a real ANTHROPIC_API_KEY."
+        "Deterministic baseline mode (no LLM active for this screen) -- "
+        "every proposal below shows search_status=NOT_SEARCHED."
     )
 
 approved_ids = set()
@@ -316,7 +336,7 @@ if st.button("Apply Approved Evidence"):
     if trigger["updates"]:
         result = build_new_version(working_dossier, trigger)
         st.session_state["working_dossier"] = result["dossier"]
-        st.session_state.pop("approved_params", None)  # stale against the new version, see §0(c)
+        st.session_state.pop("approved_params", None)
         st.success(
             f"Applied {len(trigger['updates'])} approved proposal(s). "
             f"New version: v{result['dossier']['version']}."
@@ -327,11 +347,13 @@ if st.button("Apply Approved Evidence"):
 
 # --- Step 5: Parameter Extraction + Review ---
 st.subheader("4. Parameter Extraction + Review")
-extracted = extract_parameters(working_dossier, llm_call=None)
+extracted = extract_parameters(
+    working_dossier,
+    llm_call=call_anthropic_parameter_extraction if flag_param_extraction else None,
+)
 st.caption(
-    "Deterministic baseline mode (no LLM wired into this page yet) -- "
-    "every parameter below is MISSING until you fill it in and approve. "
-    "This is the real Parameter Review screen, not a placeholder."
+    "Live extraction active." if flag_param_extraction else
+    "Deterministic baseline mode -- every parameter below is MISSING until you fill it in and approve."
 )
 
 overrides = {}
@@ -346,7 +368,7 @@ for i, param in enumerate(INDEPENDENTS):
         default_value = info["value"] if info["value"] is not None else 0.0
         val = st.number_input(
             f"value_{param}", value=float(default_value),
-            key=f"param_{param}_{dossier_filename}_v{working_dossier['version']}",
+            key=f"param_{param}_{dossier_filename}_v{working_dossier['version']}_{flag_param_extraction}",
             label_visibility="collapsed",
         )
         overrides[param] = {"value": val, "evidence_label": "FOUNDER_OPINION"}
@@ -398,12 +420,9 @@ if approved:
     st.dataframe(
         [
             {
-                "test_id": r.test_id,
-                "category": r.category,
-                "shocked_param": r.shocked_param,
-                "multiplier": r.shock_multiplier,
-                "affected_metric": r.affected_metric,
-                "value": r.metric_value,
+                "test_id": r.test_id, "category": r.category,
+                "shocked_param": r.shocked_param, "multiplier": r.shock_multiplier,
+                "affected_metric": r.affected_metric, "value": r.metric_value,
                 "outcome": f"{OUTCOME_ICONS.get(r.outcome, '')} {r.outcome}",
             }
             for r in fixed_results
@@ -412,27 +431,19 @@ if approved:
     )
 
     st.markdown("**Generated tests** (top-3 ranked claims, qualitative probes)")
-    st.caption(
-        "Deterministic baseline mode (no LLM wired into this screen yet, "
-        "same convention as Parameter Extraction and Ranking above) -- "
-        "every generated test below shows status=FAILED until a future "
-        "packet wires the probe LLM in. This is the real Generated Test "
-        "list, not a placeholder -- test_id, category, target hypothesis, "
-        "and overlap with the fixed library are all real, computed data."
-    )
+    st.caption("Live probes active." if flag_probes else "Deterministic baseline mode -- every generated test below shows status=FAILED.")
     generated_specs = generate_test_specs(claims_ranked, n=3)
     generated_results = [
-        run_qualitative_probe(spec, llm_call=_no_llm_probe_call) for spec in generated_specs
+        run_qualitative_probe(spec, llm_call=call_anthropic_probe if flag_probes else _no_llm_probe_call)
+        for spec in generated_specs
     ]
     st.dataframe(
         [
             {
-                "test_id": r.test_id,
-                "category": r.category,
+                "test_id": r.test_id, "category": r.category,
                 "target_hypothesis_id": r.target_hypothesis_id,
                 "overlaps_with_fixed": ", ".join(r.overlaps_with_fixed) or "none",
-                "status": r.status,
-                "severity": r.severity or "-",
+                "status": r.status, "severity": r.severity or "-",
             }
             for r in generated_results
         ],
@@ -454,10 +465,7 @@ if approved:
     kill_text = get_kill_criteria_text(working_dossier)
     if kill_text.strip():
         st.text_area("F2 -- kill_criteria (read-only)", value=kill_text, height=100, disabled=True)
-        st.caption(
-            "Automated detection not wired into this screen yet -- read the "
-            "text above yourself and classify it."
-        )
+        st.caption("Automated detection intentionally not wired -- see Packet #14 header. Read the text above yourself and classify it.")
         kill_status = st.radio(
             "Founder review",
             ["No concern", "Possible match (unconfirmed)", "Confirmed match"],
@@ -480,19 +488,12 @@ if approved:
         st.caption("No ceiling triggers -- nothing capped this idea below Advance.")
 
     st.markdown("**Recommendation**")
-    st.caption(
-        "Deterministic baseline mode (no LLM wired into this screen yet, same "
-        "convention as every other screen) -- the recommendation always "
-        "degrades to a system-generated Reject (status=FALLBACK_REJECT), "
-        "citing the ceiling's own triggers as evidence."
-    )
+    st.caption("Live recommendation active." if flag_recommendation else "Deterministic baseline mode -- always falls back to Reject (status=FALLBACK_REJECT).")
     recommendation = recommend_outcome(
-        ceiling_result, claims_ranked, all_stress_results, llm_call=_no_llm_recommendation_call
+        ceiling_result, claims_ranked, all_stress_results,
+        llm_call=call_anthropic_recommendation if flag_recommendation else _no_llm_recommendation_call,
     )
-    st.write(
-        f"{DECISION_ICONS.get(recommendation['outcome'], '')} "
-        f"**{recommendation['outcome']}** ({recommendation['status']})"
-    )
+    st.write(f"{DECISION_ICONS.get(recommendation['outcome'], '')} **{recommendation['outcome']}** ({recommendation['status']})")
     st.json(recommendation["payload"])
 
     valid_refs = {h.source_field for h in claims_ranked} | {r.test_id for r in all_stress_results}
@@ -532,7 +533,4 @@ if scenarios:
         file_name=f"vdve_export_{working_dossier.get('dossier_id', 'unknown')}_v{working_dossier.get('version')}.json",
         mime="application/json",
     )
-    st.caption(
-        "This export is the seed of the P1.2 Stress Test input contract -- "
-        "the first full run's artifact, saved."
-    )
+    st.caption("This export is the seed of the P1.2 Stress Test input contract -- the first full run's artifact, saved.")

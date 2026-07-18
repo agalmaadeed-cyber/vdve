@@ -40,6 +40,7 @@ from datetime import datetime, timezone
 from typing import Callable
 
 from theoretical.hypothesis_extraction.scanner import Hypothesis
+from theoretical.llm_utils import strip_json_markdown_fence
 
 VALID_PROPOSED_LABELS = frozenset({"CONFIRMED", "ESTIMATE", "ASSUMPTION", "FOUNDER_OPINION"})
 
@@ -101,6 +102,7 @@ def call_anthropic_evidence_search(hypotheses: list[Hypothesis]) -> str:
     message = client.messages.create(
         model="claude-sonnet-5",
         max_tokens=4096,
+        thinking={"type": "disabled"},
         system=EVIDENCE_SEARCH_SYSTEM_PROMPT,
         tools=[{"type": "web_search_20250305", "name": "web_search"}],
         messages=[{"role": "user", "content": json.dumps(_build_payload(hypotheses), ensure_ascii=False)}],
@@ -124,6 +126,7 @@ def apply_evidence_search_guards(
     input_ids = {h.source_field for h in hypotheses}
 
     try:
+        raw_llm_response = strip_json_markdown_fence(raw_llm_response)
         parsed = json.loads(raw_llm_response)
         if not isinstance(parsed, list):
             raise ValueError("not an array")
