@@ -1,6 +1,6 @@
 import json
 
-from theoretical.llm_utils import strip_json_markdown_fence
+from theoretical.llm_utils import strip_json_markdown_fence, escape_markdown_dollar
 from theoretical.hypothesis_extraction.phrasing import apply_phrasing_guards
 from theoretical.hypothesis_extraction.scanner import Hypothesis
 
@@ -46,3 +46,25 @@ def test_integration_fenced_response_parses_correctly_through_apply_phrasing_gua
     result = apply_phrasing_guards([hyp], fenced_response)
     assert result[0].phrasing_status == "PHRASED"
     assert result[0].statement == "A falsifiable statement."
+
+
+def test_no_dollar_text_passes_through_unchanged():
+    text = "A plain sentence with no currency figures."
+    assert escape_markdown_dollar(text) == text
+
+
+def test_single_dollar_figure_is_escaped():
+    text = "Priced at $19/seat/month."
+    assert escape_markdown_dollar(text) == "Priced at \\$19/seat/month."
+
+
+def test_multiple_dollar_figures_are_all_escaped():
+    # Reproduces the exact shape observed live in the P1.3 walkthrough's
+    # D5 evidence proposal: two dollar figures in one string, which
+    # Streamlit's default KaTeX rendering swallows between them.
+    text = "Estimated at $0.01-0.03 originally, now under $0.001/message."
+    assert escape_markdown_dollar(text) == "Estimated at \\$0.01-0.03 originally, now under \\$0.001/message."
+
+
+def test_non_string_passes_through_unchanged():
+    assert escape_markdown_dollar(None) is None

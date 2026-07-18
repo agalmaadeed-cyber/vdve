@@ -24,3 +24,19 @@ def strip_json_markdown_fence(text: str) -> str:
         return text
     matches = _FENCE_PATTERN.findall(text)
     return matches[-1].strip() if matches else text.strip()
+
+
+def escape_markdown_dollar(text: str) -> str:
+    """
+    Streamlit's st.markdown/st.write render "$...$" as inline LaTeX
+    (KaTeX) with no per-call opt-out. Free LLM text containing two or
+    more literal "$" figures (e.g. cited prices) gets the text between
+    them silently swallowed into a garbled math-mode render -- found
+    live during the P1.3 full-cycle walkthrough (D5 evidence proposal,
+    2026-07-18). Escaping to "\\$" is the standard workaround. Display
+    -only: never apply this before storing or exporting the underlying
+    text -- only immediately before a markdown-rendering call.
+    """
+    if not isinstance(text, str):
+        return text
+    return text.replace("$", "\\$")
