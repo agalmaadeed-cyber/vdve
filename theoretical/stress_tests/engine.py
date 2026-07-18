@@ -27,6 +27,7 @@ from dataclasses import dataclass, field
 from typing import Callable
 
 from theoretical.hypothesis_extraction.scanner import Hypothesis
+from theoretical.llm_utils import strip_json_markdown_fence
 from theoretical.simulation.unit_economics import INDEPENDENTS, compute_unit_economics
 from theoretical.stress_tests.fixed_library import FIXED_TESTS, SECTION_TO_CATEGORY
 
@@ -194,11 +195,13 @@ def call_anthropic_probe(spec: dict) -> str:
     }
     message = client.messages.create(
         model="claude-sonnet-5",
-        max_tokens=1024,
+        max_tokens=2048,
+        thinking={"type": "disabled"},
         system=PROBE_SYSTEM_PROMPT,
         messages=[{"role": "user", "content": json.dumps(payload, ensure_ascii=False)}],
     )
-    return message.content[0].text
+    text_blocks = [block.text for block in message.content if getattr(block, "type", None) == "text"]
+    return text_blocks[-1] if text_blocks else ""
 
 
 def run_qualitative_probe(
@@ -219,6 +222,7 @@ def run_qualitative_probe(
 
     severity, rationale, ok = None, None, False
     try:
+        raw_response = strip_json_markdown_fence(raw_response)
         parsed = json.loads(raw_response)
         if (
             isinstance(parsed, dict)

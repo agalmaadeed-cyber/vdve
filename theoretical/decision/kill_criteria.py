@@ -31,6 +31,7 @@ import os
 from typing import Callable
 
 from theoretical.hypothesis_extraction.scanner import Hypothesis
+from theoretical.llm_utils import strip_json_markdown_fence
 from theoretical.stress_tests.engine import StressTestResult
 
 KILL_CHECK_SYSTEM_PROMPT = """You check whether a venture's current evidence shows a possible match against its own founder-declared kill criteria.
@@ -127,6 +128,7 @@ def detect_kill_criteria_match(
         raw_response = ""
 
     try:
+        raw_response = strip_json_markdown_fence(raw_response)
         parsed = json.loads(raw_response)
         possible_match = parsed.get("possible_match")
         rationale = parsed.get("rationale")

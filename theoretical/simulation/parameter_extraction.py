@@ -20,7 +20,10 @@ it.
 from __future__ import annotations
 
 import json
+import os
 from typing import Callable
+
+from theoretical.llm_utils import strip_json_markdown_fence
 
 FIELD_SOURCE_MAP: dict[str, list[str]] = {
     "price_per_unit": ["D3", "D4"],
@@ -98,6 +101,7 @@ def extract_parameters(dossier: dict, llm_call: Callable | None = None) -> dict:
             raw_response = ""
 
     try:
+        raw_response = strip_json_markdown_fence(raw_response)
         parsed = json.loads(raw_response) if raw_response else []
         if not isinstance(parsed, list):
             raise ValueError("not an array")
@@ -158,3 +162,40 @@ def apply_founder_overrides(extracted: dict, overrides: dict) -> dict:
         else:
             result[param] = info
     return result
+
+
+PARAMETER_EXTRACTION_SYSTEM_PROMPT = """You extract numeric business parameters from Dossier free text.
+
+You will receive a JSON object: {parameter_name: {"raw_texts": [str, ...], "evidence_label": str, "source_fields": [str, ...]}}.
+
+For each parameter where the raw_texts genuinely state or clearly imply one specific number, output an object with EXACTLY these keys: "parameter_name" (copied exactly from input) and "value" (a plain number -- no currency symbols, no units, no ranges; if a range is given, use its midpoint).
+
+Omit any parameter you cannot confidently extract one specific number for -- omission means MISSING, never a guess.
+
+Output ONLY a JSON array of these objects (possibly empty). No prose, no markdown fencing, no explanation outside the JSON array itself."""
+
+
+def call_anthropic_parameter_extraction(extractable: dict) -> str:
+    """
+    Real LLM call (P1.0.4b.2). Reads ANTHROPIC_API_KEY from the
+    environment via the SDK's default client behavior. Model pinned
+    to "claude-sonnet-5", same as every prior packet.
+    """
+    import anthropic
+
+    if not os.environ.get("ANTHROPIC_API_KEY"):
+        raise RuntimeError(
+            "ANTHROPIC_API_KEY not set in environment. This must be set "
+            "locally by the founder -- never hardcoded, never committed."
+        )
+
+    client = anthropic.Anthropic()
+    message = client.messages.create(
+        model="claude-sonnet-5",
+        max_tokens=2048,
+        thinking={"type": "disabled"},
+        system=PARAMETER_EXTRACTION_SYSTEM_PROMPT,
+        messages=[{"role": "user", "content": json.dumps(extractable, ensure_ascii=False)}],
+    )
+    text_blocks = [block.text for block in message.content if getattr(block, "type", None) == "text"]
+    return text_blocks[-1] if text_blocks else ""

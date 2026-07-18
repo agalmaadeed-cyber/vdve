@@ -24,6 +24,7 @@ from dataclasses import replace
 from typing import Callable
 
 from theoretical.hypothesis_extraction.scanner import Hypothesis
+from theoretical.llm_utils import strip_json_markdown_fence
 
 PHRASING_SYSTEM_PROMPT = """You convert Dossier field content into testable hypothesis statements for MVP Studio's Theoretical Validation Cycle.
 
@@ -71,6 +72,7 @@ def call_anthropic_phrasing(hypotheses: list[Hypothesis]) -> str:
     message = client.messages.create(
         model="claude-sonnet-5",
         max_tokens=4096,
+        thinking={"type": "disabled"},
         system=PHRASING_SYSTEM_PROMPT,
         messages=[
             {
@@ -79,7 +81,8 @@ def call_anthropic_phrasing(hypotheses: list[Hypothesis]) -> str:
             }
         ],
     )
-    return message.content[0].text
+    text_blocks = [block.text for block in message.content if getattr(block, "type", None) == "text"]
+    return text_blocks[-1] if text_blocks else ""
 
 
 def apply_phrasing_guards(
@@ -106,6 +109,7 @@ def apply_phrasing_guards(
     input_field_codes = {h.source_field for h in hypotheses}
 
     try:
+        raw_llm_response = strip_json_markdown_fence(raw_llm_response)
         parsed = json.loads(raw_llm_response)
         if not isinstance(parsed, list):
             raise ValueError("LLM response is not a JSON array")
