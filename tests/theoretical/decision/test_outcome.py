@@ -14,6 +14,17 @@ def _claim(field, statement="stmt", rank_score=5):
     )
 
 
+def _unknown(field, statement="unknown stmt"):
+    return Hypothesis(
+        dossier_id="DS-TEST", dossier_version=1, source_field=field,
+        source_section="opportunity", source_subfield="x",
+        original_evidence_label="UNKNOWN", raw_dossier_text="raw",
+        hypothesis_type="unknown", statement=statement, phrasing_status="PHRASED",
+        risk_score=5, uncertainty_score=1, rank_score=5, rank=1,
+        adjustment_status="FAILED", dependent_fields=[], adjustment_rationale=None,
+    )
+
+
 def _test_result(test_id, outcome="BREAKS"):
     return StressTestResult(
         test_id=test_id, test_type="quantitative_shock", category="cost",
@@ -162,3 +173,53 @@ def test_full_pipeline_reproduces_ds_0fe02838_real_founder_data():
     valid_refs = {r.test_id for r in real_results}
     acceptance = verify_decision_acceptance(recommendation, ceiling_result, valid_refs)
     assert acceptance["valid"] is True
+
+
+def test_unknown_hypothesis_is_a_valid_grounding_reference():
+    # This is the exact case that was structurally impossible before this
+    # packet's fix (p1.2_packet_17): a Pass with Conditions ceiling triggered
+    # by an unresolved unknown, with a condition referencing that unknown's
+    # own field code.
+    unknown = _unknown("C4")
+    ceiling_result = {"ceiling": "Pass with Conditions", "triggered_by": ["Pass with Conditions:unknowns_present"]}
+
+    def fake_llm(payload):
+        return '{"outcome": "Pass with Conditions", "narrative": "C4 is unresolved and must be tested.", ' \
+               '"conditions": [{"hypothesis_id": "C4", "condition": "Resolve C4 via a founder field interview."}]}'
+
+    result = recommend_outcome(ceiling_result, [], [], [unknown], llm_call=fake_llm)
+    assert result["status"] == "LLM_RECOMMENDED"
+    assert result["payload"]["conditions"][0]["hypothesis_id"] == "C4"
+
+
+def test_llm_payload_includes_unknowns():
+    unknown = _unknown("C4", statement="What is the true market size?")
+    ceiling_result = {"ceiling": "Pass with Conditions", "triggered_by": []}
+    captured_payload = {}
+
+    def fake_llm(payload):
+        captured_payload.update(payload)
+        return '{"outcome": "Pass with Conditions", "narrative": "x", ' \
+               '"conditions": [{"hypothesis_id": "C4", "condition": "y"}]}'
+
+    recommend_outcome(ceiling_result, [], [], [unknown], llm_call=fake_llm)
+    assert "unknowns" in captured_payload
+    assert captured_payload["unknowns"] == [{"hypothesis_id": "C4", "statement": "What is the true market size?"}]
+
+
+def test_unknowns_ranked_defaults_to_empty_and_is_backward_compatible():
+    # Calls recommend_outcome() with no unknowns_ranked argument at all --
+    # positional, matching every pre-existing call site's exact shape.
+    ceiling_result = {"ceiling": "Pass with Conditions", "triggered_by": ["Pass with Conditions:stress_test_breaks:ST-04"]}
+    claims = [_claim("A1")]
+    tests = [_test_result("ST-04")]
+
+    def fake_llm(payload):
+        assert payload["unknowns"] == []
+        return '{"outcome": "Pass with Conditions", "narrative": "ST-04 breaks but A1 is testable in field.", ' \
+               '"conditions": [{"hypothesis_id": "A1", "condition": "Validate demand via 20 field interviews."}]}'
+
+    result = recommend_outcome(ceiling_result, claims, tests, llm_call=fake_llm)
+    assert result["status"] == "LLM_RECOMMENDED"
+    assert result["outcome"] == "Pass with Conditions"
+    assert result["payload"]["conditions"][0]["hypothesis_id"] == "A1"
