@@ -369,6 +369,8 @@ for i, param in enumerate(INDEPENDENTS):
         st.markdown(f"**{param}**")
         st.caption(f"{icon} {info['evidence_label']} | {info['extraction_status']}")
         st.caption(f"source: {info['source_fields'] or 'none'}")
+        if info["extraction_status"] == "MISSING":
+            st.warning("No value extracted -- enter a real estimate below, not the 0.0 default.")
         default_value = info["value"] if info["value"] is not None else 0.0
         val = st.number_input(
             f"value_{param}", value=float(default_value),
