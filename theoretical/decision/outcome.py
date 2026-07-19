@@ -45,7 +45,7 @@ Output ONLY one JSON object with these keys:
   - "Reject": "decisive_evidence" -- a non-empty array of hypothesis_id or test_id strings from the input.
   - "Hold": "reevaluation_conditions" -- a non-empty string describing what would wake this idea back up.
   - "Reformulate": "reformulation_targets" -- a non-empty array of {"field": hypothesis_id string from the input, "guidance": non-empty string}.
-  - "Pass with Conditions": "conditions" -- a non-empty array of {"hypothesis_id": string from the input, "condition": non-empty string, phrased to be testable as a real-world experiment}.
+  - "Pass with Conditions": "conditions" -- a non-empty array of {"hypothesis_id": a hypothesis_id from "claims" or "unknowns" ONLY -- never a stress_tests test_id, "condition": non-empty string, phrased to be testable as a real-world experiment}. If a condition is motivated by a stress test breaking, identify and cite the underlying hypothesis it puts at risk instead of the test itself -- you may still name the test by id inside the free-text "condition" string if it helps explain the reasoning.
   - "Advance": "advance_confirmation" -- true.
 
 No prose, no markdown fencing, no explanation outside the JSON object itself."""
@@ -82,13 +82,13 @@ def _validate_reformulate(payload: dict, valid_refs: set[str]) -> bool:
     )
 
 
-def _validate_pass_with_conditions(payload: dict, valid_refs: set[str]) -> bool:
+def _validate_pass_with_conditions(payload: dict, hypothesis_refs: set[str]) -> bool:
     conditions = payload.get("conditions")
     return (
         isinstance(conditions, list) and bool(conditions)
         and all(
             isinstance(c, dict)
-            and c.get("hypothesis_id") in valid_refs
+            and c.get("hypothesis_id") in hypothesis_refs
             and isinstance(c.get("condition"), str) and c["condition"].strip()
             for c in conditions
         )
@@ -100,11 +100,11 @@ def _validate_advance(payload: dict) -> bool:
 
 
 _VALIDATORS: dict[str, Callable] = {
-    "Reject": lambda p, refs: _validate_reject(p, refs),
-    "Hold": lambda p, refs: _validate_hold(p),
-    "Reformulate": lambda p, refs: _validate_reformulate(p, refs),
-    "Pass with Conditions": lambda p, refs: _validate_pass_with_conditions(p, refs),
-    "Advance": lambda p, refs: _validate_advance(p),
+    "Reject": lambda p, refs, hyp_refs: _validate_reject(p, refs),
+    "Hold": lambda p, refs, hyp_refs: _validate_hold(p),
+    "Reformulate": lambda p, refs, hyp_refs: _validate_reformulate(p, refs),
+    "Pass with Conditions": lambda p, refs, hyp_refs: _validate_pass_with_conditions(p, hyp_refs),
+    "Advance": lambda p, refs, hyp_refs: _validate_advance(p),
 }
 
 
@@ -154,6 +154,7 @@ def recommend_outcome(
         | {h.source_field for h in unknowns_ranked}
         | {r.test_id for r in stress_results}
     )
+    hypothesis_refs = {h.source_field for h in claims_ranked} | {h.source_field for h in unknowns_ranked}
 
     llm_payload = {
         "ceiling": ceiling,
@@ -197,7 +198,7 @@ def recommend_outcome(
             and isinstance(narrative, str) and narrative.strip()
         ):
             key = PAYLOAD_KEYS[outcome]
-            if key in parsed and _VALIDATORS[outcome](parsed, valid_refs):
+            if key in parsed and _VALIDATORS[outcome](parsed, valid_refs, hypothesis_refs):
                 return {
                     "outcome": outcome,
                     "status": "LLM_RECOMMENDED",

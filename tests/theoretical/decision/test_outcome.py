@@ -160,17 +160,18 @@ def test_full_pipeline_reproduces_ds_0fe02838_real_founder_data():
         StressTestResult(test_id="ST-06", test_type="quantitative_shock", category="founder",
                           source="fixed_library", status="COMPLETED", outcome="NOT_EVALUABLE"),
     ]
+    claims = [_claim("D3")]  # pricing hypothesis -- thematically the one ST-04's margin shock threatens
     ceiling_result = compute_ceiling([], real_results, kill_match_confirmed=False, kill_match_detected=False)
     assert ceiling_result["ceiling"] == "Pass with Conditions"
 
     def fake_llm(payload):
         return '{"outcome": "Pass with Conditions", "narrative": "Fragile margin, needs field validation.", ' \
-               '"conditions": [{"hypothesis_id": "ST-04", "condition": "Test willingness to pay at a higher price point."}]}'
+               '"conditions": [{"hypothesis_id": "D3", "condition": "Test willingness to pay at a higher price point."}]}'
 
-    recommendation = recommend_outcome(ceiling_result, [], real_results, llm_call=fake_llm)
+    recommendation = recommend_outcome(ceiling_result, claims, real_results, llm_call=fake_llm)
     assert recommendation["status"] == "LLM_RECOMMENDED"
 
-    valid_refs = {r.test_id for r in real_results}
+    valid_refs = {h.source_field for h in claims} | {r.test_id for r in real_results}
     acceptance = verify_decision_acceptance(recommendation, ceiling_result, valid_refs)
     assert acceptance["valid"] is True
 
@@ -223,3 +224,59 @@ def test_unknowns_ranked_defaults_to_empty_and_is_backward_compatible():
     assert result["status"] == "LLM_RECOMMENDED"
     assert result["outcome"] == "Pass with Conditions"
     assert result["payload"]["conditions"][0]["hypothesis_id"] == "A1"
+
+
+def test_pass_with_conditions_rejects_stress_test_id_as_hypothesis_id():
+    # The exact case this packet closes -- citing a test_id where a
+    # hypothesis_id is required now correctly falls back, instead of
+    # silently succeeding (which is what let Gate 4 criterion 4
+    # disagree with this function in the first place -- see
+    # p1.3_packet_03 §5, Finding A).
+    ceiling_result = {"ceiling": "Pass with Conditions", "triggered_by": ["Pass with Conditions:stress_test_breaks:ST-01"]}
+    tests = [_test_result("ST-01")]
+
+    def fake_llm(payload):
+        return '{"outcome": "Pass with Conditions", "narrative": "x", ' \
+               '"conditions": [{"hypothesis_id": "ST-01", "condition": "y"}]}'
+
+    result = recommend_outcome(ceiling_result, [], tests, llm_call=fake_llm)
+    assert result["status"] == "FALLBACK_REJECT"
+
+
+def test_pass_with_conditions_still_accepts_a_real_claim():
+    ceiling_result = {"ceiling": "Pass with Conditions", "triggered_by": []}
+    claims = [_claim("A1")]
+
+    def fake_llm(payload):
+        return '{"outcome": "Pass with Conditions", "narrative": "x", ' \
+               '"conditions": [{"hypothesis_id": "A1", "condition": "y"}]}'
+
+    result = recommend_outcome(ceiling_result, claims, [], llm_call=fake_llm)
+    assert result["status"] == "LLM_RECOMMENDED"
+
+
+def test_pass_with_conditions_still_accepts_a_real_unknown():
+    # Confirms this packet's narrowing doesn't undo Packet #17's fix --
+    # unknowns remain valid Pass with Conditions grounding references.
+    ceiling_result = {"ceiling": "Pass with Conditions", "triggered_by": []}
+    unknown = _unknown("C4")
+
+    def fake_llm(payload):
+        return '{"outcome": "Pass with Conditions", "narrative": "x", ' \
+               '"conditions": [{"hypothesis_id": "C4", "condition": "y"}]}'
+
+    result = recommend_outcome(ceiling_result, [], [], unknowns_ranked=[unknown], llm_call=fake_llm)
+    assert result["status"] == "LLM_RECOMMENDED"
+
+
+def test_reject_still_accepts_a_stress_test_id_as_decisive_evidence():
+    # Confirms §0(b) -- Reject's broader valid_refs is deliberately
+    # untouched by this packet's narrowing.
+    ceiling_result = {"ceiling": "Hold", "triggered_by": []}
+    tests = [_test_result("ST-01")]
+
+    def fake_llm(payload):
+        return '{"outcome": "Reject", "narrative": "x", "decisive_evidence": ["ST-01"]}'
+
+    result = recommend_outcome(ceiling_result, [], tests, llm_call=fake_llm)
+    assert result["status"] == "LLM_RECOMMENDED"
