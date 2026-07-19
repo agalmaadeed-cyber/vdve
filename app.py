@@ -491,13 +491,17 @@ if approved:
     st.markdown("**Recommendation**")
     st.caption("Live recommendation active." if flag_recommendation else "Deterministic baseline mode -- always falls back to Reject (status=FALLBACK_REJECT).")
     recommendation = recommend_outcome(
-        ceiling_result, claims_ranked, all_stress_results,
+        ceiling_result, claims_ranked, all_stress_results, unknowns_ranked,
         llm_call=call_anthropic_recommendation if flag_recommendation else _no_llm_recommendation_call,
     )
     st.write(f"{DECISION_ICONS.get(recommendation['outcome'], '')} **{recommendation['outcome']}** ({recommendation['status']})")
     st.json(recommendation["payload"])
 
-    valid_refs = {h.source_field for h in claims_ranked} | {r.test_id for r in all_stress_results}
+    valid_refs = (
+        {h.source_field for h in claims_ranked}
+        | {h.source_field for h in unknowns_ranked}
+        | {r.test_id for r in all_stress_results}
+    )
     acceptance = verify_decision_acceptance(recommendation, ceiling_result, valid_refs)
     if acceptance["valid"]:
         st.success("✅ Decision acceptance check: valid (ceiling matches, range respected, grounding resolved).")

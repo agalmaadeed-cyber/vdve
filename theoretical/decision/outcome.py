@@ -34,11 +34,13 @@ RECOMMENDATION_SYSTEM_PROMPT = """You recommend one theoretical-decision outcome
 
 Legal ordering (most to least conservative): Reject < Hold < Reformulate < Pass with Conditions < Advance.
 
-You will receive one JSON object: {"ceiling": str, "ceiling_reasons": [str, ...], "claims": [{"hypothesis_id": str, "statement": str, "rank_score": number|null}], "stress_tests": [{"test_id": str, "outcome_or_severity": str, "category": str}]}.
+You will receive one JSON object: {"ceiling": str, "ceiling_reasons": [str, ...], "claims": [{"hypothesis_id": str, "statement": str, "rank_score": number|null}], "unknowns": [{"hypothesis_id": str, "statement": str}], "stress_tests": [{"test_id": str, "outcome_or_severity": str, "category": str}]}.
+
+"unknowns" are hypotheses with no current answer -- if the ceiling is "Pass with Conditions" because unresolved unknowns exist, your conditions[] should generally include one addressing each unknown listed, phrased as a concrete way to resolve it.
 
 Output ONLY one JSON object with these keys:
 - "outcome": one of "Reject", "Hold", "Reformulate", "Pass with Conditions", "Advance" -- must be equal to or more conservative than "ceiling".
-- "narrative": a non-empty string explaining your reasoning, grounded in the specific claims/stress_tests given.
+- "narrative": a non-empty string explaining your reasoning, grounded in the specific claims/unknowns/stress_tests given.
 - Exactly one payload key, matching your chosen outcome:
   - "Reject": "decisive_evidence" -- a non-empty array of hypothesis_id or test_id strings from the input.
   - "Hold": "reevaluation_conditions" -- a non-empty string describing what would wake this idea back up.
@@ -132,19 +134,26 @@ def recommend_outcome(
     ceiling_result: dict,
     claims_ranked: list[Hypothesis],
     stress_results: list[StressTestResult],
+    unknowns_ranked: list[Hypothesis] | None = None,
     llm_call: Callable[[dict], str] = call_anthropic_recommendation,
 ) -> dict:
     """
-    Returns a TheoreticalDecision dict:
-      {"outcome": str, "status": "LLM_RECOMMENDED"|"FALLBACK_REJECT",
-       "narrative": str|None, "payload": {...one key...},
-       "allowed_range": {"floor": "Reject", "ceiling": str}}
+    Returns a TheoreticalDecision dict (unchanged shape -- see original
+    docstring). unknowns_ranked defaults to None/empty for backward
+    compatibility with every existing call site; when provided, its
+    hypotheses become valid grounding references on the same terms as
+    claims (this packet's fix -- see p1.2_packet_17 §0).
 
     ceiling_result is Packet #8's compute_ceiling() output, taken as
     given -- never recomputed or second-guessed here.
     """
+    unknowns_ranked = unknowns_ranked or []
     ceiling = ceiling_result["ceiling"]
-    valid_refs = {h.source_field for h in claims_ranked} | {r.test_id for r in stress_results}
+    valid_refs = (
+        {h.source_field for h in claims_ranked}
+        | {h.source_field for h in unknowns_ranked}
+        | {r.test_id for r in stress_results}
+    )
 
     llm_payload = {
         "ceiling": ceiling,
@@ -152,6 +161,10 @@ def recommend_outcome(
         "claims": [
             {"hypothesis_id": h.source_field, "statement": h.statement or h.raw_dossier_text, "rank_score": h.rank_score}
             for h in claims_ranked
+        ],
+        "unknowns": [
+            {"hypothesis_id": h.source_field, "statement": h.statement or h.raw_dossier_text}
+            for h in unknowns_ranked
         ],
         "stress_tests": [
             {"test_id": r.test_id, "outcome_or_severity": r.outcome or r.severity or r.status, "category": r.category}
