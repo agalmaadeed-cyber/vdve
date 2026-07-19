@@ -25,6 +25,7 @@ import copy
 import json
 import os
 from dataclasses import asdict
+from datetime import datetime, timezone
 from pathlib import Path
 
 import streamlit as st
@@ -55,6 +56,8 @@ from theoretical.stress_tests.engine import (
 from theoretical.decision.ceiling import compute_ceiling
 from theoretical.decision.kill_criteria import get_kill_criteria_text
 from theoretical.decision.outcome import recommend_outcome, verify_decision_acceptance, call_anthropic_recommendation
+from theoretical.decision.cycle_record import build_cycle_record
+from theoretical.decision.gate4 import compute_gate4_verdict
 
 EVIDENCE_ICONS = {
     "CONFIRMED": "✅",       # same five icons as Idea Dossier
@@ -476,6 +479,7 @@ if approved:
         kill_match_confirmed = kill_status == "Confirmed match"
     else:
         st.caption("No kill_criteria (F2) declared for this Dossier.")
+        kill_status = "No concern"
         kill_match_detected = False
         kill_match_confirmed = False
 
@@ -510,9 +514,92 @@ if approved:
 else:
     st.info("Approve parameters above to compute a theoretical decision.")
 
-# --- Step 9: Export ---
+# --- Step 9: Gate 4 Check ---
+st.session_state.setdefault("cycle_records", [])
+st.session_state.setdefault("gate4_signoffs", {})
+
+if approved and ceiling_result and recommendation:
+    st.subheader("8. Gate 4 Check")
+    st.caption(
+        "Finalizing freezes a snapshot of this decision (P1.0.8's Theoretical "
+        "Cycle Record) -- session-only, same as everything else in this app. "
+        "You can finalize now and keep working the Dossier -- Gate 4 will "
+        "correctly flag a stale record if you check it later."
+    )
+
+    if st.button("Finalize This Decision as a Cycle Record"):
+        record = build_cycle_record(
+            working_dossier, claims_ranked, unknowns_ranked, approved,
+            all_stress_results, kill_status, ceiling_result, recommendation,
+        )
+        st.session_state["cycle_records"].append(record)
+        st.success(f"Cycle record finalized: `{record['cycle_record_id'][:8]}` (dossier v{record['dossier_version']}).")
+        st.rerun()
+
+    records = [
+        r for r in st.session_state["cycle_records"]
+        if r["dossier_id"] == working_dossier.get("dossier_id")
+    ]
+    if not records:
+        st.info("No cycle records finalized yet for this dossier.")
+    else:
+        st.dataframe(
+            [
+                {
+                    "id": r["cycle_record_id"][:8], "dossier_version": r["dossier_version"],
+                    "outcome": r["recommendation"]["outcome"], "created_at": r["created_at"],
+                    "signed_off": r["cycle_record_id"] in st.session_state["gate4_signoffs"],
+                }
+                for r in records
+            ],
+            use_container_width=True,
+        )
+
+        selected_id = st.selectbox(
+            "Check a finalized cycle record against Gate 4",
+            options=[r["cycle_record_id"] for r in records],
+            format_func=lambda rid: rid[:8],
+            index=len(records) - 1,
+        )
+        selected_record = next(r for r in records if r["cycle_record_id"] == selected_id)
+        verdict = compute_gate4_verdict(selected_record, working_dossier)
+
+        result_icon = "✅" if verdict["result"] == "PASS" else "\U0001F534"
+        st.markdown(f"**Gate 4: {result_icon} {verdict['result']}**")
+        st.dataframe(
+            [
+                {"#": c["criterion"], "check": c["id"], "applicable": c["applicable"], "passed": c["passed"]}
+                for c in verdict["checks"]
+            ],
+            use_container_width=True,
+        )
+        with st.expander("Full check evidence (raw)"):
+            st.json(verdict["checks"])
+
+        if verdict["result"] == "BLOCK":
+            st.error("Reason codes: " + ", ".join(verdict["reason_codes"]))
+            st.caption(
+                f"Routes to: {verdict['block_routes_to']['outcome']} "
+                f"(hold_origin={verdict['block_routes_to']['hold_origin']})"
+            )
+        else:
+            signed_off_at = st.session_state["gate4_signoffs"].get(selected_id)
+            if signed_off_at:
+                st.success(f"✅ Founder sign-off confirmed at {signed_off_at}.")
+            else:
+                st.warning(
+                    "Gate 4 computes PASS deterministically -- activating it still "
+                    "requires your sign-off (P1.0.8(c))."
+                )
+                if st.button("Confirm Gate 4 Sign-off", key=f"signoff_{selected_id}"):
+                    st.session_state["gate4_signoffs"][selected_id] = datetime.now(timezone.utc).isoformat()
+                    st.rerun()
+else:
+    st.info("Compute a theoretical decision above to finalize and check a cycle record.")
+
+# --- Step 10: Export ---
 if scenarios:
-    st.subheader("8. Export")
+    st.subheader("9. Export")
     export_data = {
         "dossier_id": working_dossier.get("dossier_id"),
         "dossier_version": working_dossier.get("version"),
@@ -531,6 +618,11 @@ if scenarios:
             "recommendation": recommendation,
             "acceptance": acceptance,
         } if ceiling_result else {},
+        "cycle_records": [
+            r for r in st.session_state.get("cycle_records", [])
+            if r["dossier_id"] == working_dossier.get("dossier_id")
+        ],
+        "gate4_signoffs": st.session_state.get("gate4_signoffs", {}),
     }
     st.download_button(
         "Export JSON",
