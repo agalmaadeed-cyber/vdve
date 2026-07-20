@@ -58,6 +58,7 @@ from theoretical.decision.kill_criteria import get_kill_criteria_text
 from theoretical.decision.outcome import recommend_outcome, verify_decision_acceptance, call_anthropic_recommendation
 from theoretical.decision.cycle_record import build_cycle_record
 from theoretical.decision.gate4 import compute_gate4_verdict
+from venture_story.generator import generate_venture_story
 
 EVIDENCE_ICONS = {
     "CONFIRMED": "✅",       # same five icons as Idea Dossier
@@ -596,6 +597,24 @@ if approved and ceiling_result and recommendation:
                 if st.button("Confirm Gate 4 Sign-off", key=f"signoff_{selected_id}"):
                     st.session_state["gate4_signoffs"][selected_id] = datetime.now(timezone.utc).isoformat()
                     st.rerun()
+
+            if signed_off_at:
+                st.markdown("---")
+                st.download_button(
+                    "Download Venture Story (.docx)",
+                    data=generate_venture_story(
+                        working_dossier, selected_record, verdict, signed_off_at, scenarios
+                    ),
+                    file_name=(
+                        f"venture_story_{working_dossier.get('dossier_id', 'unknown')}"
+                        f"_v{working_dossier.get('version')}.docx"
+                    ),
+                    mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                )
+                st.caption(
+                    "A human-readable, printable narrative for a partner or investor -- "
+                    "deterministic, no LLM involved (Decision P1.0.10)."
+                )
 else:
     st.info("Compute a theoretical decision above to finalize and check a cycle record.")
 
