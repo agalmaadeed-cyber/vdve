@@ -14,6 +14,8 @@ this codebase.
 
 from __future__ import annotations
 
+import hashlib
+import json
 import re
 
 _FENCE_PATTERN = re.compile(r"```(?:json)?\s*\n?(.*?)\n?```", re.DOTALL)
@@ -40,3 +42,19 @@ def escape_markdown_dollar(text: str) -> str:
     if not isinstance(text, str):
         return text
     return text.replace("$", "\\$")
+
+
+def compute_payload_hash(payload) -> str:
+    """
+    Deterministic hash of a JSON-serializable payload -- the cache key
+    app.py's live-LLM-step cache (cost-redundancy fix, P1.4 Packet #2)
+    uses to detect whether a pipeline step's ACTUAL inputs changed
+    since its last successful live call, never just whether a sidebar
+    flag is on. sort_keys=True makes the hash stable regardless of
+    dict key ordering; default=str handles any value json.dumps can't
+    natively serialize defensively rather than crashing the page over
+    a hashing edge case. Never used for anything security-sensitive --
+    purely a change-detection key for an in-session cache.
+    """
+    serialized = json.dumps(payload, sort_keys=True, default=str, ensure_ascii=False)
+    return hashlib.sha256(serialized.encode("utf-8")).hexdigest()

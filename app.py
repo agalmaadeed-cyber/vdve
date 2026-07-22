@@ -30,7 +30,7 @@ from pathlib import Path
 
 import streamlit as st
 
-from theoretical.llm_utils import escape_markdown_dollar
+from theoretical.llm_utils import escape_markdown_dollar, compute_payload_hash
 from theoretical.hypothesis_extraction.scanner import scan_dossier
 from theoretical.hypothesis_extraction.phrasing import phrase_hypotheses, call_anthropic_phrasing
 from theoretical.hypothesis_extraction.ranking import rank_hypotheses, call_anthropic_risk_adjustment
@@ -122,6 +122,43 @@ def _load_anthropic_key() -> str | None:
     return key or None
 
 
+def _llm_step_cache_key(step_name: str, dossier_id: str, dossier_version: int, payload_for_hash) -> str:
+    return f"{step_name}:{dossier_id}:v{dossier_version}:{compute_payload_hash(payload_for_hash)}"
+
+
+def _get_cached_llm_step(step_name: str, dossier_id: str, dossier_version: int, payload_for_hash):
+    """
+    Session-state-backed cache lookup -- Packet B's cost-redundancy
+    fix (P1.4 Packet #2). Returns (result, found: bool). A hit means
+    these EXACT inputs already produced a live result this session --
+    no API call needed. A miss means the caller must show an explicit
+    run button and wait for a click; it must NEVER call the API
+    automatically, since automatic-on-every-rerun is precisely the
+    behavior this packet exists to remove (see phase1_decisions_log.md
+    and p1.4_packet_02_llm_call_deduplication.md S0).
+    """
+    cache = st.session_state.setdefault("llm_step_cache", {})
+    key = _llm_step_cache_key(step_name, dossier_id, dossier_version, payload_for_hash)
+    if key in cache:
+        return cache[key], True
+    return None, False
+
+
+def _store_cached_llm_step(
+    step_name: str, dossier_id: str, dossier_version: int, payload_for_hash, result, api_calls_made: int = 1
+) -> None:
+    """
+    api_calls_made lets a step that fans out into multiple real API
+    calls in one click (only run_qualitative_probe does this -- one
+    call per generated spec, up to 3) report its true count. Every
+    other step makes exactly one call per click, the default.
+    """
+    cache = st.session_state.setdefault("llm_step_cache", {})
+    key = _llm_step_cache_key(step_name, dossier_id, dossier_version, payload_for_hash)
+    cache[key] = result
+    st.session_state["api_call_count"] = st.session_state.get("api_call_count", 0) + api_calls_made
+
+
 # Registered acceptance numbers -- phase1_decisions_log.md (P1.0.2 / P1.0.3).
 # Only valid at working_dossier version 1 -- see Packet #13's §0(b).
 KNOWN_ACCEPTANCE = {
@@ -151,6 +188,8 @@ if _anthropic_key:
 else:
     st.info("\U0001F50C LLM features: OFF -- deterministic baseline (no ANTHROPIC_API_KEY found in secrets.toml or environment).")
     flag_phrasing = flag_risk_adj = flag_param_extraction = flag_probes = flag_evidence = flag_recommendation = False
+
+st.sidebar.caption(f"API calls this session: {st.session_state.get('api_call_count', 0)}")
 
 # --- Dossier selection ---
 st.sidebar.header("Dossier Input")
@@ -198,7 +237,31 @@ scan_result = scan_dossier(working_dossier)
 
 hypotheses_for_pipeline = scan_result.hypotheses
 if flag_phrasing:
-    hypotheses_for_pipeline = phrase_hypotheses(scan_result.hypotheses, llm_call=call_anthropic_phrasing)
+    phrasing_hash_payload = [
+        {
+            "field_code": h.source_field, "hypothesis_type": h.hypothesis_type,
+            "source_section": h.source_section, "raw_text": h.raw_dossier_text,
+        }
+        for h in scan_result.hypotheses
+    ]
+    cached, found = _get_cached_llm_step(
+        "phrasing", working_dossier["dossier_id"], working_dossier.get("version", 1), phrasing_hash_payload
+    )
+    if found:
+        hypotheses_for_pipeline = cached
+        st.caption("Live phrasing active -- using cached result (inputs unchanged since last live run).")
+    else:
+        st.info("Live phrasing: inputs changed (or first run this session) -- click to phrase live.")
+        if st.button(
+            "Run live phrasing",
+            key=f"run_phrasing_{working_dossier['dossier_id']}_v{working_dossier.get('version', 1)}",
+        ):
+            hypotheses_for_pipeline = phrase_hypotheses(scan_result.hypotheses, llm_call=call_anthropic_phrasing)
+            _store_cached_llm_step(
+                "phrasing", working_dossier["dossier_id"], working_dossier.get("version", 1),
+                phrasing_hash_payload, hypotheses_for_pipeline,
+            )
+            st.rerun()
 
 # --- Live acceptance bar: the page itself is an acceptance test ---
 if working_dossier.get("version", 1) == 1 and dossier_filename in KNOWN_ACCEPTANCE:
@@ -247,10 +310,34 @@ st.caption(f"Excluded fields (EXTRACTION_EXCLUSIONS): {scan_result.excluded_fiel
 
 # --- Step 3: Ranking ---
 st.subheader("2. Ranking (risk x uncertainty)")
-claims_ranked, unknowns_ranked = rank_hypotheses(
-    hypotheses_for_pipeline,
-    llm_call=call_anthropic_risk_adjustment if flag_risk_adj else None,
-)
+if flag_risk_adj:
+    ranking_hash_payload = [
+        {"field_code": h.source_field, "section": h.source_section, "statement": h.statement or h.raw_dossier_text}
+        for h in hypotheses_for_pipeline
+    ]
+    cached, found = _get_cached_llm_step(
+        "risk_adjustment", working_dossier["dossier_id"], working_dossier.get("version", 1), ranking_hash_payload
+    )
+    if found:
+        claims_ranked, unknowns_ranked = cached
+        st.caption("Live risk adjustment active -- using cached result (inputs unchanged since last live run).")
+    else:
+        st.info("Live risk adjustment: inputs changed (or first run this session) -- click to adjust live.")
+        claims_ranked, unknowns_ranked = rank_hypotheses(hypotheses_for_pipeline, llm_call=None)
+        if st.button(
+            "Run live risk adjustment",
+            key=f"run_risk_adj_{working_dossier['dossier_id']}_v{working_dossier.get('version', 1)}",
+        ):
+            claims_ranked, unknowns_ranked = rank_hypotheses(
+                hypotheses_for_pipeline, llm_call=call_anthropic_risk_adjustment
+            )
+            _store_cached_llm_step(
+                "risk_adjustment", working_dossier["dossier_id"], working_dossier.get("version", 1),
+                ranking_hash_payload, (claims_ranked, unknowns_ranked),
+            )
+            st.rerun()
+else:
+    claims_ranked, unknowns_ranked = rank_hypotheses(hypotheses_for_pipeline, llm_call=None)
 
 col1, col2 = st.columns(2)
 with col1:
@@ -301,11 +388,37 @@ if use_mock:
         "approve -> vN+1 -> re-extraction loop with zero cost and no API key."
     )
 elif flag_evidence:
-    evidence_results = gather_evidence(
-        all_hyps_for_search, working_dossier.get("version", 1), llm_call=call_anthropic_evidence_search
+    evidence_hash_payload = sorted(h.source_field for h in all_hyps_for_search)
+    cached, found = _get_cached_llm_step(
+        "evidence_search", working_dossier["dossier_id"], working_dossier.get("version", 1), evidence_hash_payload
     )
-    proposals = [asdict(r) for r in evidence_results]
-    st.caption("Live evidence search active (real web search) -- proposals below are genuine.")
+    if found:
+        evidence_results = cached
+        proposals = [asdict(r) for r in evidence_results]
+        st.caption(
+            "Live evidence search active -- using cached result (target hypotheses unchanged since the "
+            "last successful search for this dossier version; no new web_search calls made)."
+        )
+    else:
+        st.info(
+            "Live evidence search: target hypotheses changed (or first search this session/version) "
+            "-- click to search live (this calls the mandatory web_search tool)."
+        )
+        evidence_results = []
+        proposals = []
+        if st.button(
+            "Run live evidence search",
+            key=f"run_evidence_{working_dossier['dossier_id']}_v{working_dossier.get('version', 1)}",
+        ):
+            evidence_results = gather_evidence(
+                all_hyps_for_search, working_dossier.get("version", 1), llm_call=call_anthropic_evidence_search
+            )
+            proposals = [asdict(r) for r in evidence_results]
+            _store_cached_llm_step(
+                "evidence_search", working_dossier["dossier_id"], working_dossier.get("version", 1),
+                evidence_hash_payload, evidence_results,
+            )
+            st.rerun()
 else:
     evidence_results = gather_evidence(
         all_hyps_for_search, working_dossier.get("version", 1), llm_call=_no_llm_evidence_call
@@ -352,14 +465,30 @@ if st.button("Apply Approved Evidence"):
 
 # --- Step 5: Parameter Extraction + Review ---
 st.subheader("4. Parameter Extraction + Review")
-extracted = extract_parameters(
-    working_dossier,
-    llm_call=call_anthropic_parameter_extraction if flag_param_extraction else None,
-)
-st.caption(
-    "Live extraction active." if flag_param_extraction else
-    "Deterministic baseline mode -- every parameter below is MISSING until you fill it in and approve."
-)
+if flag_param_extraction:
+    param_hash_payload = working_dossier.get("sections", {})
+    cached, found = _get_cached_llm_step(
+        "parameter_extraction", working_dossier["dossier_id"], working_dossier.get("version", 1), param_hash_payload
+    )
+    if found:
+        extracted = cached
+        st.caption("Live extraction active -- using cached result (Dossier content unchanged since last live run).")
+    else:
+        st.info("Live extraction: Dossier content changed (or first run this session/version) -- click to extract live.")
+        extracted = extract_parameters(working_dossier, llm_call=None)
+        if st.button(
+            "Run live parameter extraction",
+            key=f"run_param_extraction_{working_dossier['dossier_id']}_v{working_dossier.get('version', 1)}",
+        ):
+            extracted = extract_parameters(working_dossier, llm_call=call_anthropic_parameter_extraction)
+            _store_cached_llm_step(
+                "parameter_extraction", working_dossier["dossier_id"], working_dossier.get("version", 1),
+                param_hash_payload, extracted,
+            )
+            st.rerun()
+else:
+    extracted = extract_parameters(working_dossier, llm_call=None)
+    st.caption("Deterministic baseline mode -- every parameter below is MISSING until you fill it in and approve.")
 
 overrides = {}
 param_cols = st.columns(len(INDEPENDENTS))
@@ -438,12 +567,37 @@ if approved:
     )
 
     st.markdown("**Generated tests** (top-3 ranked claims, qualitative probes)")
-    st.caption("Live probes active." if flag_probes else "Deterministic baseline mode -- every generated test below shows status=FAILED.")
     generated_specs = generate_test_specs(claims_ranked, n=3)
-    generated_results = [
-        run_qualitative_probe(spec, llm_call=call_anthropic_probe if flag_probes else _no_llm_probe_call)
-        for spec in generated_specs
-    ]
+    if flag_probes:
+        probe_hash_payload = generated_specs
+        cached, found = _get_cached_llm_step(
+            "qualitative_probes", working_dossier["dossier_id"], working_dossier.get("version", 1), probe_hash_payload
+        )
+        if found:
+            generated_results = cached
+            st.caption("Live probes active -- using cached result (top-3 claims unchanged since last live run).")
+        else:
+            st.info("Live probes: top-3 claims changed (or first run this session) -- click to probe live.")
+            generated_results = [
+                run_qualitative_probe(spec, llm_call=_no_llm_probe_call) for spec in generated_specs
+            ]
+            if st.button(
+                "Run live qualitative probes",
+                key=f"run_probes_{working_dossier['dossier_id']}_v{working_dossier.get('version', 1)}",
+            ):
+                generated_results = [
+                    run_qualitative_probe(spec, llm_call=call_anthropic_probe) for spec in generated_specs
+                ]
+                _store_cached_llm_step(
+                    "qualitative_probes", working_dossier["dossier_id"], working_dossier.get("version", 1),
+                    probe_hash_payload, generated_results, api_calls_made=len(generated_specs),
+                )
+                st.rerun()
+    else:
+        st.caption("Deterministic baseline mode -- every generated test below shows status=FAILED.")
+        generated_results = [
+            run_qualitative_probe(spec, llm_call=_no_llm_probe_call) for spec in generated_specs
+        ]
     st.dataframe(
         [
             {
@@ -496,11 +650,54 @@ if approved:
         st.caption("No ceiling triggers -- nothing capped this idea below Advance.")
 
     st.markdown("**Recommendation**")
-    st.caption("Live recommendation active." if flag_recommendation else "Deterministic baseline mode -- always falls back to Reject (status=FALLBACK_REJECT).")
-    recommendation = recommend_outcome(
-        ceiling_result, claims_ranked, all_stress_results, unknowns_ranked,
-        llm_call=call_anthropic_recommendation if flag_recommendation else _no_llm_recommendation_call,
-    )
+    if flag_recommendation:
+        recommendation_hash_payload = {
+            "ceiling": ceiling_result["ceiling"],
+            "ceiling_reasons": ceiling_result["triggered_by"],
+            "claims": [
+                {"field": h.source_field, "statement": h.statement or h.raw_dossier_text, "rank_score": h.rank_score}
+                for h in claims_ranked
+            ],
+            "unknowns": [
+                {"field": h.source_field, "statement": h.statement or h.raw_dossier_text} for h in unknowns_ranked
+            ],
+            "stress_tests": [
+                {"test_id": r.test_id, "outcome_or_severity": r.outcome or r.severity or r.status}
+                for r in all_stress_results
+            ],
+        }
+        cached, found = _get_cached_llm_step(
+            "recommendation", working_dossier["dossier_id"], working_dossier.get("version", 1),
+            recommendation_hash_payload,
+        )
+        if found:
+            recommendation = cached
+            st.caption("Live recommendation active -- using cached result (ceiling/claims/stress tests unchanged since last live run).")
+        else:
+            st.info("Live recommendation: inputs changed (or first run this session) -- click to recommend live.")
+            recommendation = recommend_outcome(
+                ceiling_result, claims_ranked, all_stress_results, unknowns_ranked,
+                llm_call=_no_llm_recommendation_call,
+            )
+            if st.button(
+                "Run live recommendation",
+                key=f"run_recommendation_{working_dossier['dossier_id']}_v{working_dossier.get('version', 1)}",
+            ):
+                recommendation = recommend_outcome(
+                    ceiling_result, claims_ranked, all_stress_results, unknowns_ranked,
+                    llm_call=call_anthropic_recommendation,
+                )
+                _store_cached_llm_step(
+                    "recommendation", working_dossier["dossier_id"], working_dossier.get("version", 1),
+                    recommendation_hash_payload, recommendation,
+                )
+                st.rerun()
+    else:
+        st.caption("Deterministic baseline mode -- always falls back to Reject (status=FALLBACK_REJECT).")
+        recommendation = recommend_outcome(
+            ceiling_result, claims_ranked, all_stress_results, unknowns_ranked,
+            llm_call=_no_llm_recommendation_call,
+        )
     st.write(f"{DECISION_ICONS.get(recommendation['outcome'], '')} **{recommendation['outcome']}** ({recommendation['status']})")
     st.json(recommendation["payload"])
 
