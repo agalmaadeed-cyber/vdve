@@ -102,6 +102,26 @@ def _no_llm_evidence_call(hypotheses: list) -> str:
     return ""
 
 
+def _display_status(real_status: str, is_live: bool) -> str:
+    """
+    Display-only override -- cross-project evaluation item a.1
+    (2026-07-22). Several status fields (adjustment_status, stress-test
+    status, extraction_status, recommendation status) reuse the exact
+    same value ("FAILED"/"MISSING"/"FALLBACK_REJECT") both for "no live
+    call has ever been attempted this session" and for "a live call was
+    genuinely attempted and failed" -- indistinguishable on screen
+    before any button was ever clicked. This helper ONLY changes what
+    is rendered; it never touches the real status value stored on the
+    object, which stays exactly what it was and keeps feeding
+    compute_ceiling()/Gate 4/every other downstream consumer unchanged.
+    Pass is_live=True only at the call site that is genuinely
+    displaying a cached live result (Packet B's `found` flag); every
+    other path (flag off, or flag on but not yet run this session)
+    passes is_live=False and gets the neutral "NOT_RUN" label instead.
+    """
+    return real_status if is_live else "NOT_RUN"
+
+
 def _load_anthropic_key() -> str | None:
     """
     Streamlit secrets.toml is the source of truth (matches the
@@ -310,6 +330,7 @@ st.caption(f"Excluded fields (EXTRACTION_EXCLUSIONS): {scan_result.excluded_fiel
 
 # --- Step 3: Ranking ---
 st.subheader("2. Ranking (risk x uncertainty)")
+ranking_live = False
 if flag_risk_adj:
     ranking_hash_payload = [
         {"field_code": h.source_field, "section": h.source_section, "statement": h.statement or h.raw_dossier_text}
@@ -320,6 +341,7 @@ if flag_risk_adj:
     )
     if found:
         claims_ranked, unknowns_ranked = cached
+        ranking_live = True
         st.caption("Live risk adjustment active -- using cached result (inputs unchanged since last live run).")
     else:
         st.info("Live risk adjustment: inputs changed (or first run this session) -- click to adjust live.")
@@ -347,7 +369,8 @@ with col1:
             {
                 "rank": h.rank, "field": h.source_field,
                 "risk": h.risk_score, "uncertainty": h.uncertainty_score,
-                "rank_score": h.rank_score, "adjustment_status": h.adjustment_status,
+                "rank_score": h.rank_score,
+                "adjustment_status": _display_status(h.adjustment_status, ranking_live),
             }
             for h in claims_ranked
         ],
@@ -360,7 +383,8 @@ with col2:
             {
                 "rank": h.rank, "field": h.source_field,
                 "risk": h.risk_score, "uncertainty": h.uncertainty_score,
-                "rank_score": h.rank_score, "adjustment_status": h.adjustment_status,
+                "rank_score": h.rank_score,
+                "adjustment_status": _display_status(h.adjustment_status, ranking_live),
             }
             for h in unknowns_ranked
         ],
@@ -465,6 +489,7 @@ if st.button("Apply Approved Evidence"):
 
 # --- Step 5: Parameter Extraction + Review ---
 st.subheader("4. Parameter Extraction + Review")
+param_extraction_live = False
 if flag_param_extraction:
     param_hash_payload = working_dossier.get("sections", {})
     cached, found = _get_cached_llm_step(
@@ -472,6 +497,7 @@ if flag_param_extraction:
     )
     if found:
         extracted = cached
+        param_extraction_live = True
         st.caption("Live extraction active -- using cached result (Dossier content unchanged since last live run).")
     else:
         st.info("Live extraction: Dossier content changed (or first run this session/version) -- click to extract live.")
@@ -488,7 +514,7 @@ if flag_param_extraction:
             st.rerun()
 else:
     extracted = extract_parameters(working_dossier, llm_call=None)
-    st.caption("Deterministic baseline mode -- every parameter below is MISSING until you fill it in and approve.")
+    st.caption("Deterministic baseline mode -- every parameter below shows NOT_RUN until a live extraction runs, or you fill it in yourself and approve.")
 
 overrides = {}
 param_cols = st.columns(len(INDEPENDENTS))
@@ -497,7 +523,7 @@ for i, param in enumerate(INDEPENDENTS):
     icon = EVIDENCE_ICONS.get(info["evidence_label"], "")
     with param_cols[i]:
         st.markdown(f"**{param}**")
-        st.caption(f"{icon} {info['evidence_label']} | {info['extraction_status']}")
+        st.caption(f"{icon} {info['evidence_label']} | {_display_status(info['extraction_status'], param_extraction_live)}")
         st.caption(f"source: {info['source_fields'] or 'none'}")
         if info["extraction_status"] == "MISSING":
             st.warning("No value extracted -- enter a real estimate below, not the 0.0 default.")
@@ -568,6 +594,7 @@ if approved:
 
     st.markdown("**Generated tests** (top-3 ranked claims, qualitative probes)")
     generated_specs = generate_test_specs(claims_ranked, n=3)
+    probes_live = False
     if flag_probes:
         probe_hash_payload = generated_specs
         cached, found = _get_cached_llm_step(
@@ -575,6 +602,7 @@ if approved:
         )
         if found:
             generated_results = cached
+            probes_live = True
             st.caption("Live probes active -- using cached result (top-3 claims unchanged since last live run).")
         else:
             st.info("Live probes: top-3 claims changed (or first run this session) -- click to probe live.")
@@ -594,7 +622,7 @@ if approved:
                 )
                 st.rerun()
     else:
-        st.caption("Deterministic baseline mode -- every generated test below shows status=FAILED.")
+        st.caption("Deterministic baseline mode -- every generated test below shows status=NOT_RUN.")
         generated_results = [
             run_qualitative_probe(spec, llm_call=_no_llm_probe_call) for spec in generated_specs
         ]
@@ -604,7 +632,7 @@ if approved:
                 "test_id": r.test_id, "category": r.category,
                 "target_hypothesis_id": r.target_hypothesis_id,
                 "overlaps_with_fixed": ", ".join(r.overlaps_with_fixed) or "none",
-                "status": r.status, "severity": r.severity or "-",
+                "status": _display_status(r.status, probes_live), "severity": r.severity or "-",
             }
             for r in generated_results
         ],
@@ -650,6 +678,7 @@ if approved:
         st.caption("No ceiling triggers -- nothing capped this idea below Advance.")
 
     st.markdown("**Recommendation**")
+    recommendation_live = False
     if flag_recommendation:
         recommendation_hash_payload = {
             "ceiling": ceiling_result["ceiling"],
@@ -672,6 +701,7 @@ if approved:
         )
         if found:
             recommendation = cached
+            recommendation_live = True
             st.caption("Live recommendation active -- using cached result (ceiling/claims/stress tests unchanged since last live run).")
         else:
             st.info("Live recommendation: inputs changed (or first run this session) -- click to recommend live.")
@@ -693,12 +723,15 @@ if approved:
                 )
                 st.rerun()
     else:
-        st.caption("Deterministic baseline mode -- always falls back to Reject (status=FALLBACK_REJECT).")
+        st.caption("Deterministic baseline mode -- not yet evaluated (falls back to Reject/NOT_RUN until a live recommendation runs).")
         recommendation = recommend_outcome(
             ceiling_result, claims_ranked, all_stress_results, unknowns_ranked,
             llm_call=_no_llm_recommendation_call,
         )
-    st.write(f"{DECISION_ICONS.get(recommendation['outcome'], '')} **{recommendation['outcome']}** ({recommendation['status']})")
+    st.write(
+        f"{DECISION_ICONS.get(recommendation['outcome'], '')} **{recommendation['outcome']}** "
+        f"({_display_status(recommendation['status'], recommendation_live)})"
+    )
     st.json(recommendation["payload"])
 
     valid_refs = (
