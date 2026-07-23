@@ -530,7 +530,18 @@ for i, param in enumerate(INDEPENDENTS):
         default_value = info["value"] if info["value"] is not None else 0.0
         val = st.number_input(
             f"value_{param}", value=float(default_value),
-            key=f"param_{param}_{dossier_filename}_v{working_dossier['version']}_{flag_param_extraction}",
+            # a.3 fix (cross-project evaluation, 2026-07-23): the key MUST
+            # change when a genuine live extraction result becomes available
+            # this session -- param_extraction_live, not flag_param_extraction.
+            # flag_param_extraction stays True across the entire
+            # "Run live parameter extraction" click+rerun (only the flag
+            # toggle changes it), so keying on the flag alone left the
+            # widget's key identical before and after a genuine live run --
+            # Streamlit then reuses the OLD widget state (0.0, from the
+            # pre-run baseline) and ignores the new `value=` default,
+            # so the number box stayed stuck at 0.00 even though the
+            # caption right above it correctly flipped to EXTRACTED.
+            key=f"param_{param}_{dossier_filename}_v{working_dossier['version']}_{param_extraction_live}",
             label_visibility="collapsed",
         )
         overrides[param] = {"value": val, "evidence_label": "FOUNDER_OPINION"}
