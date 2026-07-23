@@ -76,6 +76,11 @@ def build_new_version(dossier: dict, trigger: dict, now: str | None = None) -> d
             field_obj["evidence_label"] = "UNKNOWN"
             field_obj["filled_by"] = "vdve_reformulation"
             field_obj["filled_at"] = timestamp
+            # a.2 fix (cross-project evaluation, 2026-07-23): the field's
+            # content is being wiped back to blank/UNKNOWN, so any prior
+            # mock-evidence provenance no longer describes anything real --
+            # clear it rather than leaving a stale True on an empty field.
+            field_obj["is_mock_evidence"] = False
 
     elif trigger["type"] == "evidence_update":
         for update in trigger.get("updates", []):
@@ -93,12 +98,20 @@ def build_new_version(dossier: dict, trigger: dict, now: str | None = None) -> d
                 "after_label": update.get("new_evidence_label"),
                 "trigger": "evidence_update",
                 "rationale": update.get("source"),
+                "is_mock": bool(update.get("is_mock", False)),
             })
             field_obj["value"] = update.get("new_value")
             field_obj["evidence_label"] = update.get("new_evidence_label")
             field_obj["sources"] = list(field_obj.get("sources") or []) + [update.get("source")]
             field_obj["filled_by"] = "vdve_evidence_gathering"
             field_obj["filled_at"] = timestamp
+            # a.2 fix (cross-project evaluation, 2026-07-23): persist the
+            # update's mock/live origin directly onto the field, not just
+            # in session-level UI state -- this is what lets a "MOCK" badge
+            # stay durably visible in the Ranking table (and any future
+            # per-field view) across every later version, not just at the
+            # moment of approval.
+            field_obj["is_mock_evidence"] = bool(update.get("is_mock", False))
 
     new_dossier["version"] = dossier.get("version", 1) + 1
     new_dossier["version_origin"] = "vdve"

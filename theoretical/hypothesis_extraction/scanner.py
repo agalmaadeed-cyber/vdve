@@ -52,6 +52,15 @@ class Hypothesis:
     original_evidence_label: str
     raw_dossier_text: str
     hypothesis_type: HypothesisType
+    # a.2 fix (cross-project evaluation, 2026-07-23): mirrors the Dossier
+    # field's own persistent is_mock_evidence flag (set by
+    # build_new_version() when an approved evidence_update came from the
+    # "Load mock evidence proposals" demo path) -- lets the Ranking table
+    # show a durable MOCK badge, not just a session-only caption at the
+    # moment of approval. Defaults False for any field never touched by
+    # a mock-flagged evidence_update (including every pre-existing
+    # fixture Dossier, which has no such key at all).
+    is_mock_evidence: bool = False
 
     # Deferred to later implementation packets — never populated here.
     statement: str | None = None
@@ -158,6 +167,7 @@ def scan_dossier(dossier: dict) -> ScanResult:
                     original_evidence_label=evidence_label,
                     raw_dossier_text=field_obj.get("value", ""),
                     hypothesis_type=hypothesis_type,
+                    is_mock_evidence=bool(field_obj.get("is_mock_evidence", False)),
                 )
             )
 

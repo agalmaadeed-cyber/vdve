@@ -371,6 +371,10 @@ with col1:
                 "risk": h.risk_score, "uncertainty": h.uncertainty_score,
                 "rank_score": h.rank_score,
                 "adjustment_status": _display_status(h.adjustment_status, ranking_live),
+                # a.2 fix (cross-project evaluation, 2026-07-23): persistent
+                # mock-evidence badge -- survives every later version, not
+                # just the moment of approval.
+                "evidence": "🧪 MOCK" if h.is_mock_evidence else "",
             }
             for h in claims_ranked
         ],
@@ -385,6 +389,10 @@ with col2:
                 "risk": h.risk_score, "uncertainty": h.uncertainty_score,
                 "rank_score": h.rank_score,
                 "adjustment_status": _display_status(h.adjustment_status, ranking_live),
+                # a.2 fix (cross-project evaluation, 2026-07-23): persistent
+                # mock-evidence badge -- survives every later version, not
+                # just the moment of approval.
+                "evidence": "🧪 MOCK" if h.is_mock_evidence else "",
             }
             for h in unknowns_ranked
         ],
@@ -397,9 +405,15 @@ st.subheader("3. Evidence Search / Evidence Review")
 all_hyps_for_search = claims_ranked + unknowns_ranked
 current_hyp_ids = {h.source_field for h in all_hyps_for_search}
 
+# a.2 fix (cross-project evaluation, 2026-07-23): default is now always
+# False regardless of flag_evidence's state. Previously this defaulted to
+# checked (True) whenever Live Evidence Search was off, which meant a
+# founder could end up approving demo data into a real Dossier without
+# ever having made an active choice to see mock data at all. Loading mock
+# proposals is now always an explicit opt-in click, every time.
 use_mock = st.checkbox(
     "Load mock evidence proposals (demo -- zero cost, no API key)",
-    value=not flag_evidence,
+    value=False,
     key=f"use_mock_{working_dossier['dossier_id']}",
 )
 
@@ -408,8 +422,11 @@ if use_mock:
         mock_proposals = json.load(f)
     proposals = [p for p in mock_proposals if p["hypothesis_id"] in current_hyp_ids]
     st.caption(
-        "Showing hand-authored mock proposals -- proves the full "
-        "approve -> vN+1 -> re-extraction loop with zero cost and no API key."
+        "🧪 Showing hand-authored mock proposals -- proves the full "
+        "approve -> vN+1 -> re-extraction loop with zero cost and no API key. "
+        "Any proposal you approve here is permanently tagged 🧪 MOCK on that field "
+        "(visible in the Ranking table below) -- it never becomes indistinguishable "
+        "from real evidence."
     )
 elif flag_evidence:
     evidence_hash_payload = sorted(h.source_field for h in all_hyps_for_search)
@@ -474,7 +491,7 @@ for p in proposals:
             st.caption("Nothing to approve for this status -- no proposed value exists.")
 
 if st.button("Apply Approved Evidence"):
-    trigger = build_evidence_update_trigger(proposals, approved_ids)
+    trigger = build_evidence_update_trigger(proposals, approved_ids, is_mock=use_mock)
     if trigger["updates"]:
         result = build_new_version(working_dossier, trigger)
         st.session_state["working_dossier"] = result["dossier"]
