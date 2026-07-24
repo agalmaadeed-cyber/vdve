@@ -281,6 +281,11 @@ if flag_phrasing:
                 "phrasing", working_dossier["dossier_id"], working_dossier.get("version", 1),
                 phrasing_hash_payload, hypotheses_for_pipeline,
             )
+            # a.10 fix (cross-project evaluation, 2026-07-24): an active,
+            # ephemeral notification for this step's completion -- the
+            # existing pattern was a silent st.rerun() with no signal at
+            # all beyond the page re-rendering.
+            st.toast("Hypothesis phrasing complete.", icon="✅")
             st.rerun()
 
 # --- Live acceptance bar: the page itself is an acceptance test ---
@@ -357,6 +362,8 @@ if flag_risk_adj:
                 "risk_adjustment", working_dossier["dossier_id"], working_dossier.get("version", 1),
                 ranking_hash_payload, (claims_ranked, unknowns_ranked),
             )
+            # a.10 fix (cross-project evaluation, 2026-07-24): see phrasing above.
+            st.toast("Risk adjustment (ranking) complete.", icon="✅")
             st.rerun()
 else:
     claims_ranked, unknowns_ranked = rank_hypotheses(hypotheses_for_pipeline, llm_call=None)
@@ -459,6 +466,8 @@ elif flag_evidence:
                 "evidence_search", working_dossier["dossier_id"], working_dossier.get("version", 1),
                 evidence_hash_payload, evidence_results,
             )
+            # a.10 fix (cross-project evaluation, 2026-07-24): see phrasing above.
+            st.toast("Evidence search complete.", icon="✅")
             st.rerun()
 else:
     evidence_results = gather_evidence(
@@ -500,6 +509,12 @@ if st.button("Apply Approved Evidence"):
             f"Applied {len(trigger['updates'])} approved proposal(s). "
             f"New version: v{result['dossier']['version']}."
         )
+        # a.10 fix (cross-project evaluation, 2026-07-24): the st.success()
+        # above is a persistent, page-embedded confirmation (stays visible
+        # for this rerun cycle); the toast adds the same active, ephemeral
+        # top-of-page signal used at every other completion point in this
+        # app, for consistency.
+        st.toast(f"Applied {len(trigger['updates'])} evidence proposal(s).", icon="✅")
         st.rerun()
     else:
         st.info("No proposals were approved -- nothing to apply, no new version written.")
@@ -528,6 +543,8 @@ if flag_param_extraction:
                 "parameter_extraction", working_dossier["dossier_id"], working_dossier.get("version", 1),
                 param_hash_payload, extracted,
             )
+            # a.10 fix (cross-project evaluation, 2026-07-24): see phrasing above.
+            st.toast("Parameter extraction complete.", icon="✅")
             st.rerun()
 else:
     extracted = extract_parameters(working_dossier, llm_call=None)
@@ -648,6 +665,8 @@ if approved:
                     "qualitative_probes", working_dossier["dossier_id"], working_dossier.get("version", 1),
                     probe_hash_payload, generated_results, api_calls_made=len(generated_specs),
                 )
+                # a.10 fix (cross-project evaluation, 2026-07-24): see phrasing above.
+                st.toast("Stress test probes complete.", icon="✅")
                 st.rerun()
     else:
         st.caption("Deterministic baseline mode -- every generated test below shows status=NOT_RUN.")
@@ -749,6 +768,8 @@ if approved:
                     "recommendation", working_dossier["dossier_id"], working_dossier.get("version", 1),
                     recommendation_hash_payload, recommendation,
                 )
+                # a.10 fix (cross-project evaluation, 2026-07-24): see phrasing above.
+                st.toast("Recommendation complete.", icon="✅")
                 st.rerun()
     else:
         st.caption("Deterministic baseline mode -- not yet evaluated (falls back to Reject/NOT_RUN until a live recommendation runs).")
@@ -795,6 +816,8 @@ if approved and ceiling_result and recommendation:
         )
         st.session_state["cycle_records"].append(record)
         st.success(f"Cycle record finalized: `{record['cycle_record_id'][:8]}` (dossier v{record['dossier_version']}).")
+        # a.10 fix (cross-project evaluation, 2026-07-24): see evidence-review note above.
+        st.toast("Cycle record finalized.", icon="✅")
         st.rerun()
 
     records = [
@@ -854,6 +877,14 @@ if approved and ceiling_result and recommendation:
                 )
                 if st.button("Confirm Gate 4 Sign-off", key=f"signoff_{selected_id}"):
                     st.session_state["gate4_signoffs"][selected_id] = datetime.now(timezone.utc).isoformat()
+                    # a.10 fix (cross-project evaluation, 2026-07-24): this
+                    # click is the ONE moment sign-off happens -- the
+                    # st.success() a few lines above is a persistent,
+                    # state-dependent display shown on every future page
+                    # view of this record, not a one-time signal, so it
+                    # alone doesn't satisfy "active notification of THIS
+                    # completion." The toast fires exactly once, here.
+                    st.toast("Gate 4 sign-off confirmed.", icon="✅")
                     st.rerun()
 
             if signed_off_at:
