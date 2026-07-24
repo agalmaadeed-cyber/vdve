@@ -188,8 +188,8 @@ KNOWN_ACCEPTANCE = {
 
 FIXTURES_DIR = Path(__file__).resolve().parent / "fixtures"
 
-st.set_page_config(page_title="VDVE - Theoretical Validation Cycle", layout="wide")
-st.title("VDVE - Theoretical Validation Cycle (P1.1/P1.2)")
+st.set_page_config(page_title="The Crucible - Theoretical Validation Cycle", layout="wide")
+st.title("The Crucible - Theoretical Validation Cycle (P1.1/P1.2)")
 
 # --- LLM key + feature flags (Packet #14) ---
 _anthropic_key = _load_anthropic_key()
