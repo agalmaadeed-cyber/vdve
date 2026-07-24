@@ -7,9 +7,11 @@ Packet #2's phrasing guard tests.
 """
 
 import json
+import logging
 from pathlib import Path
 
 from theoretical.hypothesis_extraction.ranking import (
+    _coerce_int_adjustment,
     apply_risk_adjustment,
     compute_base_risk_score,
     compute_uncertainty_score,
@@ -137,6 +139,114 @@ def test_dependent_field_not_in_input_rejected():
     )
     result = apply_risk_adjustment(hyps, response)
     assert result[0].adjustment_status == "FAILED"  # Z9 doesn't exist in this hypothesis set
+
+
+# --- a.4 diagnostic session (2026-07-24): confirmed root cause of the
+# non-reproducible APPLIED/FAILED flip -- json.loads() hands back a
+# Python float for a JSON number written as e.g. 1.0, and the old
+# strict isinstance(adjustment, int) check silently rejected it even
+# though it is numerically identical to the int 1. ---
+
+class TestCoerceIntAdjustment:
+    def test_accepts_a_plain_int(self):
+        assert _coerce_int_adjustment(1) == 1
+        assert _coerce_int_adjustment(0) == 0
+        assert _coerce_int_adjustment(-1) == -1
+
+    def test_accepts_an_integral_float(self):
+        assert _coerce_int_adjustment(1.0) == 1
+        assert _coerce_int_adjustment(0.0) == 0
+        assert _coerce_int_adjustment(-1.0) == -1
+
+    def test_rejects_a_genuinely_fractional_float(self):
+        assert _coerce_int_adjustment(0.5) is None
+        assert _coerce_int_adjustment(1.3) is None
+
+    def test_rejects_bool(self):
+        assert _coerce_int_adjustment(True) is None
+        assert _coerce_int_adjustment(False) is None
+
+    def test_rejects_non_numeric(self):
+        assert _coerce_int_adjustment("1") is None
+        assert _coerce_int_adjustment(None) is None
+
+
+def test_integral_float_adjustment_is_now_applied_not_silently_rejected():
+    hyps = [_hyp("A1"), _hyp("B1")]
+    response = json.dumps(
+        [{"field_code": "A1", "adjustment": 1.0, "dependent_fields": ["B1"], "rationale": "depends on B1"}]
+    )
+    result = apply_risk_adjustment(hyps, response)
+    a1 = next(h for h in result if h.source_field == "A1")
+    assert a1.adjustment_status == "APPLIED", "a float-form 1.0 must be accepted exactly like the int 1"
+    assert a1.risk_score == 5 + 1
+    assert a1.dependent_fields == ["B1"]
+
+
+def test_fractional_float_adjustment_still_rejected():
+    hyps = [_hyp("A1")]
+    response = json.dumps(
+        [{"field_code": "A1", "adjustment": 0.5, "dependent_fields": ["B1"], "rationale": "invalid magnitude"}]
+    )
+    result = apply_risk_adjustment(hyps, response)
+    assert result[0].adjustment_status == "FAILED"
+
+
+def test_bool_adjustment_still_rejected():
+    hyps = [_hyp("A1")]
+    response = json.dumps(
+        [{"field_code": "A1", "adjustment": True, "dependent_fields": ["B1"], "rationale": "should not count as 1"}]
+    )
+    result = apply_risk_adjustment(hyps, response)
+    assert result[0].adjustment_status == "FAILED"
+
+
+# --- a.4 diagnostic session: logging (never changes parsing/return value) ---
+
+def test_live_call_logs_raw_response_and_per_field_diagnostics(caplog):
+    hyps = [_hyp("A1"), _hyp("B1")]
+    response = json.dumps(
+        [{"field_code": "A1", "adjustment": 1, "dependent_fields": ["B1"], "rationale": "depends on B1"}]
+    )
+    with caplog.at_level(logging.INFO, logger="vdve.risk_adjustment"):
+        apply_risk_adjustment(hyps, response)
+
+    assert len(caplog.records) == 1
+    logged = caplog.records[0].message
+    assert "A1: APPLIED adjustment=1" in logged
+    assert "B1: OMITTED" in logged
+    assert response in logged, "the full raw LLM response text must be captured verbatim"
+
+
+def test_live_call_logs_rejection_reason_not_just_failed(caplog):
+    hyps = [_hyp("A1")]
+    response = json.dumps(
+        [{"field_code": "A1", "adjustment": 1, "dependent_fields": [], "rationale": "no dep"}]
+    )
+    with caplog.at_level(logging.INFO, logger="vdve.risk_adjustment"):
+        apply_risk_adjustment(hyps, response)
+
+    logged = caplog.records[0].message
+    assert "A1: REJECTED -- dependent_fields missing or empty" in logged
+
+
+def test_baseline_no_llm_call_logs_nothing():
+    hyps = [_hyp("A1")]
+    logger = logging.getLogger("vdve.risk_adjustment")
+    records = []
+
+    class _Collector(logging.Handler):
+        def emit(self, record):
+            records.append(record)
+
+    collector = _Collector()
+    logger.addHandler(collector)
+    try:
+        apply_risk_adjustment(hyps, "")
+    finally:
+        logger.removeHandler(collector)
+
+    assert records == []
 
 
 def test_malformed_json_all_fail_to_base_weight():

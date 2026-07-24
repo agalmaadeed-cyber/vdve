@@ -26,12 +26,29 @@ Hypothesis ranking module (P1.0.3): risk x uncertainty.
 from __future__ import annotations
 
 import json
+import logging
 import os
 from dataclasses import replace
+from logging.handlers import RotatingFileHandler
+from pathlib import Path
 from typing import Callable
 
 from theoretical.hypothesis_extraction.scanner import Hypothesis
 from theoretical.llm_utils import strip_json_markdown_fence
+
+# a.4 diagnostic session (2026-07-24): the founder observed the same
+# hypothesis's adjustment_status non-reproducibly flip between APPLIED
+# and FAILED across separate live runs of the same input. The parsing
+# logic below is fully deterministic given a fixed raw_llm_response --
+# so any flip has to originate either in the raw LLM text itself
+# varying between calls, or in validation being stricter than the raw
+# response actually warrants. This codebase had NO record anywhere of
+# what a raw risk-adjustment response looked like when a flip happened
+# -- there was no way to diagnose a past occurrence, only guess. See
+# _get_diagnostics_logger() and _log_risk_adjustment_diagnostics() below.
+_DIAGNOSTICS_LOGGER_NAME = "vdve.risk_adjustment"
+_LOG_DIR = Path(__file__).resolve().parent.parent.parent / "logs"
+_LOG_FILE = _LOG_DIR / "risk_adjustment.log"
 
 UNCERTAINTY_BY_LABEL: dict[str, int] = {
     "ESTIMATE": 1,
@@ -54,6 +71,105 @@ ADJUSTMENT_CLAMP = 1  # hard bound in code, not just in the prompt (P1.0.3b.1)
 
 def _clamp_adjustment(raw_adjustment: int) -> int:
     return max(-ADJUSTMENT_CLAMP, min(ADJUSTMENT_CLAMP, raw_adjustment))
+
+
+def _coerce_int_adjustment(adjustment) -> int | None:
+    """
+    a.4 fix (diagnostic session, 2026-07-24): CONFIRMED root cause of the
+    non-reproducible APPLIED/FAILED flip. The system prompt asks the
+    model for exactly one of -1, 0, or +1 -- but whether the model
+    happens to serialize that as a JSON int (1) or a JSON float (1.0)
+    varies between calls (empirically confirmed: json.loads('1.0')
+    produces a Python float, and isinstance(1.0, int) is False even
+    though it is numerically identical to the int 1). The old strict
+    `isinstance(adjustment, int)` check silently rejected the entire
+    entry whenever the model's response happened to use the float
+    form, even though the proposed adjustment was semantically valid
+    -- causing the exact same hypothesis to flip between APPLIED and
+    FAILED across otherwise-identical runs purely due to how the model
+    chose to format the number that time, not a real change of intent.
+
+    Accepts an int directly, or a float that represents a whole number
+    (e.g. 1.0, -1.0, 0.0) and returns it as an int. A float with a
+    genuine fractional part (e.g. 0.5) does NOT represent one of the
+    three permitted values and is still correctly rejected (returns
+    None) -- this fix relaxes the *type* accepted, never the *value*
+    space. bool is explicitly rejected even though Python's bool is a
+    subclass of int (isinstance(True, int) is True) -- a stray
+    True/False must never silently become 1/0; this was a pre-existing,
+    separate edge case made visible while writing this coercion check,
+    not itself the confirmed root cause, included because it costs
+    nothing to guard against here.
+    """
+    if isinstance(adjustment, bool):
+        return None
+    if isinstance(adjustment, int):
+        return adjustment
+    if isinstance(adjustment, float) and adjustment.is_integer():
+        return int(adjustment)
+    return None
+
+
+def _get_diagnostics_logger() -> logging.Logger:
+    """
+    a.4 diagnostic session (2026-07-24): a local, gitignored log file
+    (logs/risk_adjustment.log) capturing the raw LLM response and a
+    per-hypothesis accept/reject breakdown for every LIVE risk-
+    adjustment call (never for the deterministic no-LLM baseline). Pure
+    side-channel observability -- never changes apply_risk_adjustment()'s
+    parsing logic or its return value. If the log directory can't be
+    created or written (e.g. a read-only deployment filesystem), this
+    degrades to a no-op logger rather than crashing the ranking
+    pipeline -- diagnostics are a bonus, never a dependency of the
+    actual feature.
+    """
+    logger = logging.getLogger(_DIAGNOSTICS_LOGGER_NAME)
+    if not logger.handlers:
+        logger.setLevel(logging.INFO)
+        try:
+            _LOG_DIR.mkdir(parents=True, exist_ok=True)
+            handler = RotatingFileHandler(
+                _LOG_FILE, maxBytes=5_000_000, backupCount=3, encoding="utf-8"
+            )
+            handler.setFormatter(logging.Formatter("%(asctime)s %(message)s"))
+            logger.addHandler(handler)
+        except OSError:
+            logger.addHandler(logging.NullHandler())
+    return logger
+
+
+def _log_risk_adjustment_diagnostics(
+    raw_llm_response: str,
+    input_field_codes: set[str],
+    adjustments_by_field: dict[str, dict],
+    rejection_reasons: dict[str, str],
+) -> None:
+    """
+    a.4 diagnostic session (2026-07-24): logs one INFO-level entry per
+    live risk-adjustment call -- the full raw LLM response text, plus
+    every input hypothesis's final determination: APPLIED (with the
+    accepted values), REJECTED (with the specific validation check that
+    failed), or OMITTED (the model simply proposed no adjustment for
+    that field at all -- the expected "no change" case per the system
+    prompt, not a failure). This three-way distinction is exactly the
+    signal needed to tell a genuine parsing/validation bug apart from
+    ordinary LLM judgment variance the next time a flip is observed.
+    """
+    logger = _get_diagnostics_logger()
+    lines = [f"--- risk adjustment call, {len(input_field_codes)} input field(s) ---"]
+    for field_code in sorted(input_field_codes):
+        if field_code in adjustments_by_field:
+            adj = adjustments_by_field[field_code]
+            lines.append(
+                f"  {field_code}: APPLIED adjustment={adj['adjustment']} "
+                f"dependent_fields={adj['dependent_fields']}"
+            )
+        elif field_code in rejection_reasons:
+            lines.append(f"  {field_code}: REJECTED -- {rejection_reasons[field_code]}")
+        else:
+            lines.append(f"  {field_code}: OMITTED -- model proposed no adjustment for this field")
+    lines.append(f"  raw_llm_response: {raw_llm_response!r}")
+    logger.info("\n".join(lines))
 
 
 def compute_uncertainty_score(hypothesis: Hypothesis) -> int:
@@ -80,8 +196,10 @@ def apply_risk_adjustment(
       - field_code matches an input hypothesis exactly (identity guard),
         and hasn't already been claimed by an earlier entry (first match
         wins, no overwrite -- same rule as the phrasing layer).
-      - adjustment is an int, clamped to [-1, +1] in code regardless of
-        what the LLM proposed.
+      - adjustment is an int, OR a float representing a whole number
+        (e.g. 1.0 -- a.4 fix, 2026-07-24: json.loads() can hand back
+        either depending on how the model formatted it), clamped to
+        [-1, +1] in code regardless of what the LLM proposed.
       - dependent_fields is a non-empty list of field_codes that are
         themselves present among the input hypotheses, excluding the
         hypothesis's own field_code (self-reference is not a
@@ -99,14 +217,15 @@ def apply_risk_adjustment(
     input_field_codes = {h.source_field for h in hypotheses}
 
     try:
-        raw_llm_response = strip_json_markdown_fence(raw_llm_response)
-        parsed = json.loads(raw_llm_response)
+        stripped_response = strip_json_markdown_fence(raw_llm_response)
+        parsed = json.loads(stripped_response)
         if not isinstance(parsed, list):
             raise ValueError("not an array")
     except (json.JSONDecodeError, ValueError):
         parsed = []
 
     adjustments_by_field: dict[str, dict] = {}
+    rejection_reasons: dict[str, str] = {}
     for item in parsed:
         if not isinstance(item, dict):
             continue
@@ -117,23 +236,34 @@ def apply_risk_adjustment(
 
         if field_code not in input_field_codes or field_code in adjustments_by_field:
             continue
-        if not isinstance(adjustment, int):
+
+        coerced_adjustment = _coerce_int_adjustment(adjustment)
+        if coerced_adjustment is None:
+            rejection_reasons[field_code] = f"adjustment not a valid int or integral float: {adjustment!r}"
             continue
         if not isinstance(dependent_fields, list) or not dependent_fields:
+            rejection_reasons[field_code] = f"dependent_fields missing or empty: {dependent_fields!r}"
             continue
         if not all(
             isinstance(df, str) and df in input_field_codes and df != field_code
             for df in dependent_fields
         ):
+            rejection_reasons[field_code] = f"dependent_fields contains an invalid entry: {dependent_fields!r}"
             continue
         if not isinstance(rationale, str) or not rationale.strip():
+            rejection_reasons[field_code] = f"rationale missing or empty: {rationale!r}"
             continue
 
         adjustments_by_field[field_code] = {
-            "adjustment": _clamp_adjustment(adjustment),
+            "adjustment": _clamp_adjustment(coerced_adjustment),
             "dependent_fields": dependent_fields,
             "rationale": rationale.strip(),
         }
+
+    if raw_llm_response:
+        _log_risk_adjustment_diagnostics(
+            raw_llm_response, input_field_codes, adjustments_by_field, rejection_reasons
+        )
 
     result: list[Hypothesis] = []
     for h in hypotheses:

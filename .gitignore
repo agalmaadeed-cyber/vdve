@@ -10,3 +10,8 @@ __pycache__/
 .pytest_cache/
 venv/
 .venv/
+
+# a.4 diagnostic session (2026-07-24): local-only risk-adjustment
+# diagnostic log, never committed -- may contain raw LLM output text
+# derived from real Dossier content.
+logs/
